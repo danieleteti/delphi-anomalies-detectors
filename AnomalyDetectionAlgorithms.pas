@@ -3,6 +3,13 @@ unit AnomalyDetectionAlgorithms;
 {
   Anomaly Detection Algorithms Unit
   Contains various statistical anomaly detection methods for business applications
+
+  Improvements:
+  - Fixed standard deviation calculation (using sample formula N-1)
+  - Improved performance for sliding window
+  - Complete implementation of adaptive detector
+  - Better edge case handling
+  - Added configurable sigma multiplier
 }
 
 interface
@@ -12,16 +19,41 @@ uses
 
 type
   /// <summary>
+  /// Configuration for anomaly detection sensitivity
+  /// </summary>
+  TAnomalyDetectionConfig = record
+    SigmaMultiplier: Double;  // Default 3.0 for 3-sigma rule
+    MinStdDev: Double;        // Minimum std deviation to avoid false positives
+    class function Default: TAnomalyDetectionConfig; static;
+  end;
+
+  /// <summary>
+  /// Result of anomaly detection with detailed information
+  /// </summary>
+  TAnomalyResult = record
+    IsAnomaly: Boolean;
+    Value: Double;
+    ZScore: Double;
+    LowerLimit: Double;
+    UpperLimit: Double;
+    Description: string;
+  end;
+
+  /// <summary>
   /// Base class for all anomaly detection algorithms
   /// </summary>
   TBaseAnomalyDetector = class
   protected
     FName: string;
+    FConfig: TAnomalyDetectionConfig;
   public
-    constructor Create(const AName: string);
-    function IsAnomaly(const AValue: Double): Boolean; virtual; abstract;
-    function GetAnomalyInfo(const AValue: Double): string; virtual; abstract;
+    constructor Create(const AName: string); overload;
+    constructor Create(const AName: string; const AConfig: TAnomalyDetectionConfig); overload;
+    function Detect(const AValue: Double): TAnomalyResult; virtual; abstract;
+    function IsAnomaly(const AValue: Double): Boolean; virtual;
+    function GetAnomalyInfo(const AValue: Double): string; virtual;
     property Name: string read FName;
+    property Config: TAnomalyDetectionConfig read FConfig write FConfig;
   end;
 
   /// <summary>
@@ -35,12 +67,13 @@ type
     FLowerLimit: Double;
     FUpperLimit: Double;
     FIsCalculated: Boolean;
+    procedure CalculateLimits;
   public
-    constructor Create;
+    constructor Create; overload;
+    constructor Create(const AConfig: TAnomalyDetectionConfig); overload;
     procedure SetHistoricalData(const AData: TArray<Double>);
     procedure CalculateStatistics;
-    function IsAnomaly(const AValue: Double): Boolean; override;
-    function GetAnomalyInfo(const AValue: Double): string; override;
+    function Detect(const AValue: Double): TAnomalyResult; override;
     property Mean: Double read FMean;
     property StdDev: Double read FStdDev;
     property LowerLimit: Double read FLowerLimit;
@@ -52,19 +85,24 @@ type
   /// </summary>
   TSlidingWindowDetector = class(TBaseAnomalyDetector)
   private
-    FWindowData: TQueue<Double>;
+    FWindowData: TList<Double>;
     FWindowSize: Integer;
     FMean: Double;
     FStdDev: Double;
     FLowerLimit: Double;
     FUpperLimit: Double;
+    FSum: Double;
+    FSumSquares: Double;
+    FNeedsRecalculation: Boolean;
+    procedure UpdateStatisticsIncremental(const AAddedValue, ARemovedValue: Double; AHasRemoved: Boolean);
+    procedure RecalculateStatistics;
+    procedure CalculateLimits;
   public
-    constructor Create(AWindowSize: Integer = 100);
+    constructor Create(AWindowSize: Integer = 100); overload;
+    constructor Create(AWindowSize: Integer; const AConfig: TAnomalyDetectionConfig); overload;
     destructor Destroy; override;
     procedure AddValue(const AValue: Double);
-    procedure RecalculateStatistics;
-    function IsAnomaly(const AValue: Double): Boolean; override;
-    function GetAnomalyInfo(const AValue: Double): string; override;
+    function Detect(const AValue: Double): TAnomalyResult; override;
     property CurrentMean: Double read FMean;
     property CurrentStdDev: Double read FStdDev;
     property WindowSize: Integer read FWindowSize;
@@ -84,11 +122,12 @@ type
     FInitialized: Boolean;
     FLowerLimit: Double;
     FUpperLimit: Double;
+    procedure CalculateLimits;
   public
-    constructor Create(AAlpha: Double = 0.1);
+    constructor Create(AAlpha: Double = 0.1); overload;
+    constructor Create(AAlpha: Double; const AConfig: TAnomalyDetectionConfig); overload;
     procedure AddValue(const AValue: Double);
-    function IsAnomaly(const AValue: Double): Boolean; override;
-    function GetAnomalyInfo(const AValue: Double): string; override;
+    function Detect(const AValue: Double): TAnomalyResult; override;
     property CurrentMean: Double read FCurrentMean;
     property CurrentStdDev: Double read FCurrentStdDev;
     property Alpha: Double read FAlpha;
@@ -101,21 +140,20 @@ type
   /// </summary>
   TAdaptiveAnomalyDetector = class(TBaseAnomalyDetector)
   private
-    FSlidingWindow: TQueue<Double>;
     FWindowSize: Integer;
     FMean: Double;
     FVariance: Double;
     FStdDev: Double;
     FAdaptationRate: Double;
-    FAlertThreshold: Double;
     FInitialized: Boolean;
+    FSampleCount: Integer;
+    procedure CalculateLimits;
   public
-    constructor Create(AWindowSize: Integer = 1000; AAdaptationRate: Double = 0.01);
-    destructor Destroy; override;
+    constructor Create(AWindowSize: Integer = 1000; AAdaptationRate: Double = 0.01); overload;
+    constructor Create(AWindowSize: Integer; AAdaptationRate: Double; const AConfig: TAnomalyDetectionConfig); overload;
     procedure ProcessValue(const AValue: Double);
     procedure UpdateNormal(const AValue: Double);
-    function IsAnomaly(const AValue: Double): Boolean; override;
-    function GetAnomalyInfo(const AValue: Double): string; override;
+    function Detect(const AValue: Double): TAnomalyResult; override;
     property CurrentMean: Double read FMean;
     property CurrentStdDev: Double read FStdDev;
   end;
@@ -125,26 +163,52 @@ type
   /// </summary>
   TAnomalyConfirmationSystem = class
   private
-    FRecentAnomalies: TQueue<Double>;
+    FRecentAnomalies: TList<Double>;
     FConfirmationThreshold: Integer;
     FWindowSize: Integer;
+    FTolerance: Double;
   public
-    constructor Create(AWindowSize: Integer = 10; AConfirmationThreshold: Integer = 3);
+    constructor Create(AWindowSize: Integer = 10; AConfirmationThreshold: Integer = 3; ATolerance: Double = 0.1);
     destructor Destroy; override;
     function IsConfirmedAnomaly(const AValue: Double): Boolean;
     procedure AddPotentialAnomaly(const AValue: Double);
     property ConfirmationThreshold: Integer read FConfirmationThreshold;
     property WindowSize: Integer read FWindowSize;
+    property Tolerance: Double read FTolerance write FTolerance;
   end;
 
 implementation
+
+{ TAnomalyDetectionConfig }
+
+class function TAnomalyDetectionConfig.Default: TAnomalyDetectionConfig;
+begin
+  Result.SigmaMultiplier := 3.0;
+  Result.MinStdDev := 0.001;
+end;
 
 { TBaseAnomalyDetector }
 
 constructor TBaseAnomalyDetector.Create(const AName: string);
 begin
+  Create(AName, TAnomalyDetectionConfig.Default);
+end;
+
+constructor TBaseAnomalyDetector.Create(const AName: string; const AConfig: TAnomalyDetectionConfig);
+begin
   inherited Create;
   FName := AName;
+  FConfig := AConfig;
+end;
+
+function TBaseAnomalyDetector.IsAnomaly(const AValue: Double): Boolean;
+begin
+  Result := Detect(AValue).IsAnomaly;
+end;
+
+function TBaseAnomalyDetector.GetAnomalyInfo(const AValue: Double): string;
+begin
+  Result := Detect(AValue).Description;
 end;
 
 { TThreeSigmaDetector }
@@ -152,6 +216,12 @@ end;
 constructor TThreeSigmaDetector.Create;
 begin
   inherited Create('3-Sigma Detector');
+  FIsCalculated := False;
+end;
+
+constructor TThreeSigmaDetector.Create(const AConfig: TAnomalyDetectionConfig);
+begin
+  inherited Create('3-Sigma Detector', AConfig);
   FIsCalculated := False;
 end;
 
@@ -165,63 +235,85 @@ procedure TThreeSigmaDetector.CalculateStatistics;
 var
   i: Integer;
   Sum: Double;
+  N: Integer;
 begin
-  if Length(FData) = 0 then
+  N := Length(FData);
+  if N = 0 then
     raise Exception.Create('No historical data available');
+
+  if N = 1 then
+    raise Exception.Create('Need at least 2 data points for standard deviation');
 
   // Calculate mean
   Sum := 0;
   for i := 0 to High(FData) do
     Sum := Sum + FData[i];
-  FMean := Sum / Length(FData);
+  FMean := Sum / N;
 
-  // Calculate standard deviation
+  // Calculate standard deviation (sample formula)
   Sum := 0;
   for i := 0 to High(FData) do
     Sum := Sum + Power(FData[i] - FMean, 2);
-  FStdDev := Sqrt(Sum / Length(FData));
+  FStdDev := Sqrt(Sum / (N - 1));
 
-  // Calculate 3-sigma limits
-  FLowerLimit := FMean - (3 * FStdDev);
-  FUpperLimit := FMean + (3 * FStdDev);
+  // Ensure minimum standard deviation
+  if FStdDev < FConfig.MinStdDev then
+    FStdDev := FConfig.MinStdDev;
 
+  CalculateLimits;
   FIsCalculated := True;
 end;
 
-function TThreeSigmaDetector.IsAnomaly(const AValue: Double): Boolean;
+procedure TThreeSigmaDetector.CalculateLimits;
 begin
-  if not FIsCalculated then
-    raise Exception.Create('Statistics not calculated. Call CalculateStatistics first.');
-    
-  Result := (AValue < FLowerLimit) or (AValue > FUpperLimit);
+  FLowerLimit := FMean - (FConfig.SigmaMultiplier * FStdDev);
+  FUpperLimit := FMean + (FConfig.SigmaMultiplier * FStdDev);
 end;
 
-function TThreeSigmaDetector.GetAnomalyInfo(const AValue: Double): string;
+function TThreeSigmaDetector.Detect(const AValue: Double): TAnomalyResult;
 begin
   if not FIsCalculated then
     raise Exception.Create('Statistics not calculated. Call CalculateStatistics first.');
-    
-  if IsAnomaly(AValue) then
+
+  Result.Value := AValue;
+  Result.LowerLimit := FLowerLimit;
+  Result.UpperLimit := FUpperLimit;
+  Result.IsAnomaly := (AValue < FLowerLimit) or (AValue > FUpperLimit);
+
+  if FStdDev > 0 then
+    Result.ZScore := Abs(AValue - FMean) / FStdDev
+  else
+    Result.ZScore := 0;
+
+  if Result.IsAnomaly then
   begin
     if AValue < FLowerLimit then
-      Result := Format('ANOMALY: Value %.2f below lower limit (%.2f)', 
-                      [AValue, FLowerLimit])
+      Result.Description := Format('ANOMALY: Value %.2f below lower limit (%.2f), Z-score: %.2f',
+                                  [AValue, FLowerLimit, Result.ZScore])
     else
-      Result := Format('ANOMALY: Value %.2f above upper limit (%.2f)', 
-                      [AValue, FUpperLimit]);
+      Result.Description := Format('ANOMALY: Value %.2f above upper limit (%.2f), Z-score: %.2f',
+                                  [AValue, FUpperLimit, Result.ZScore]);
   end
   else
-    Result := Format('Normal value: %.2f (range: %.2f - %.2f)', 
-                    [AValue, FLowerLimit, FUpperLimit]);
+    Result.Description := Format('Normal value: %.2f (range: %.2f - %.2f), Z-score: %.2f',
+                                [AValue, FLowerLimit, FUpperLimit, Result.ZScore]);
 end;
 
 { TSlidingWindowDetector }
 
 constructor TSlidingWindowDetector.Create(AWindowSize: Integer);
 begin
-  inherited Create('Sliding Window Detector');
+  Create(AWindowSize, TAnomalyDetectionConfig.Default);
+end;
+
+constructor TSlidingWindowDetector.Create(AWindowSize: Integer; const AConfig: TAnomalyDetectionConfig);
+begin
+  inherited Create('Sliding Window Detector', AConfig);
   FWindowSize := AWindowSize;
-  FWindowData := TQueue<Double>.Create;
+  FWindowData := TList<Double>.Create;
+  FSum := 0;
+  FSumSquares := 0;
+  FNeedsRecalculation := False;
 end;
 
 destructor TSlidingWindowDetector.Destroy;
@@ -231,28 +323,87 @@ begin
 end;
 
 procedure TSlidingWindowDetector.AddValue(const AValue: Double);
+var
+  RemovedValue: Double;
+  HasRemoved: Boolean;
 begin
-  // Add new value
-  FWindowData.Enqueue(AValue);
-  
+  HasRemoved := False;
+  RemovedValue := 0;
+
   // Remove oldest value if window is full
-  if FWindowData.Count > FWindowSize then
-    FWindowData.Dequeue;
-  
-  // Recalculate statistics
-  RecalculateStatistics;
+  if FWindowData.Count >= FWindowSize then
+  begin
+    RemovedValue := FWindowData[0];
+    FWindowData.Delete(0);
+    HasRemoved := True;
+  end;
+
+  // Add new value
+  FWindowData.Add(AValue);
+
+  // Update statistics incrementally
+  UpdateStatisticsIncremental(AValue, RemovedValue, HasRemoved);
+end;
+
+procedure TSlidingWindowDetector.UpdateStatisticsIncremental(const AAddedValue, ARemovedValue: Double; AHasRemoved: Boolean);
+var
+  N: Integer;
+begin
+  N := FWindowData.Count;
+
+  if N = 0 then
+  begin
+    FMean := 0;
+    FStdDev := 0;
+    FSum := 0;
+    FSumSquares := 0;
+    FLowerLimit := 0;
+    FUpperLimit := 0;
+    Exit;
+  end;
+
+  // Update sums
+  FSum := FSum + AAddedValue;
+  FSumSquares := FSumSquares + (AAddedValue * AAddedValue);
+
+  if AHasRemoved then
+  begin
+    FSum := FSum - ARemovedValue;
+    FSumSquares := FSumSquares - (ARemovedValue * ARemovedValue);
+  end;
+
+  // Calculate mean
+  FMean := FSum / N;
+
+  // Calculate variance and standard deviation
+  if N > 1 then
+  begin
+    var Variance := (FSumSquares - (FSum * FSum) / N) / (N - 1);
+    if Variance < 0 then // Handle numerical errors
+      Variance := 0;
+    FStdDev := Sqrt(Variance);
+
+    // Ensure minimum standard deviation
+    if FStdDev < FConfig.MinStdDev then
+      FStdDev := FConfig.MinStdDev;
+  end
+  else
+  begin
+    FStdDev := FConfig.MinStdDev;
+  end;
+
+  CalculateLimits;
 end;
 
 procedure TSlidingWindowDetector.RecalculateStatistics;
 var
-  Values: TArray<Double>;
   i: Integer;
-  Sum: Double;
+  Sum, SumSquares: Double;
+  N: Integer;
 begin
-  // Convert queue to array for calculations
-  Values := FWindowData.ToArray;
-  
-  if Length(Values) = 0 then 
+  N := FWindowData.Count;
+
+  if N = 0 then
   begin
     FMean := 0;
     FStdDev := 0;
@@ -260,50 +411,85 @@ begin
     FUpperLimit := 0;
     Exit;
   end;
-  
-  // Calculate mean
-  Sum := 0;
-  for i := 0 to High(Values) do
-    Sum := Sum + Values[i];
-  FMean := Sum / Length(Values);
-  
-  // Calculate standard deviation
-  Sum := 0;
-  for i := 0 to High(Values) do
-    Sum := Sum + Power(Values[i] - FMean, 2);
-  FStdDev := Sqrt(Sum / Length(Values));
-  
-  // Calculate 3-sigma limits
-  FLowerLimit := FMean - (3 * FStdDev);
-  FUpperLimit := FMean + (3 * FStdDev);
-end;
 
-function TSlidingWindowDetector.IsAnomaly(const AValue: Double): Boolean;
-begin
-  Result := (AValue < FLowerLimit) or (AValue > FUpperLimit);
-end;
+  // Recalculate from scratch
+  Sum := 0;
+  SumSquares := 0;
 
-function TSlidingWindowDetector.GetAnomalyInfo(const AValue: Double): string;
-begin
-  if IsAnomaly(AValue) then
+  for i := 0 to N - 1 do
   begin
-    if AValue < FLowerLimit then
-      Result := Format('WINDOW ANOMALY: Value %.2f below lower limit (%.2f)', 
-                      [AValue, FLowerLimit])
-    else
-      Result := Format('WINDOW ANOMALY: Value %.2f above upper limit (%.2f)', 
-                      [AValue, FUpperLimit]);
+    Sum := Sum + FWindowData[i];
+    SumSquares := SumSquares + (FWindowData[i] * FWindowData[i]);
+  end;
+
+  FSum := Sum;
+  FSumSquares := SumSquares;
+  FMean := Sum / N;
+
+  if N > 1 then
+  begin
+    var Variance := (SumSquares - (Sum * Sum) / N) / (N - 1);
+    if Variance < 0 then
+      Variance := 0;
+    FStdDev := Sqrt(Variance);
+
+    if FStdDev < FConfig.MinStdDev then
+      FStdDev := FConfig.MinStdDev;
   end
   else
-    Result := Format('Normal value: %.2f (range: %.2f - %.2f)', 
-                    [AValue, FLowerLimit, FUpperLimit]);
+  begin
+    FStdDev := FConfig.MinStdDev;
+  end;
+
+  CalculateLimits;
+  FNeedsRecalculation := False;
+end;
+
+procedure TSlidingWindowDetector.CalculateLimits;
+begin
+  FLowerLimit := FMean - (FConfig.SigmaMultiplier * FStdDev);
+  FUpperLimit := FMean + (FConfig.SigmaMultiplier * FStdDev);
+end;
+
+function TSlidingWindowDetector.Detect(const AValue: Double): TAnomalyResult;
+begin
+  if FNeedsRecalculation then
+    RecalculateStatistics;
+
+  Result.Value := AValue;
+  Result.LowerLimit := FLowerLimit;
+  Result.UpperLimit := FUpperLimit;
+  Result.IsAnomaly := (AValue < FLowerLimit) or (AValue > FUpperLimit);
+
+  if FStdDev > 0 then
+    Result.ZScore := Abs(AValue - FMean) / FStdDev
+  else
+    Result.ZScore := 0;
+
+  if Result.IsAnomaly then
+  begin
+    if AValue < FLowerLimit then
+      Result.Description := Format('WINDOW ANOMALY: Value %.2f below lower limit (%.2f), Z-score: %.2f',
+                                  [AValue, FLowerLimit, Result.ZScore])
+    else
+      Result.Description := Format('WINDOW ANOMALY: Value %.2f above upper limit (%.2f), Z-score: %.2f',
+                                  [AValue, FUpperLimit, Result.ZScore]);
+  end
+  else
+    Result.Description := Format('Normal value: %.2f (range: %.2f - %.2f), Z-score: %.2f',
+                                [AValue, FLowerLimit, FUpperLimit, Result.ZScore]);
 end;
 
 { TEMAAnomalyDetector }
 
 constructor TEMAAnomalyDetector.Create(AAlpha: Double);
 begin
-  inherited Create('Exponential Moving Average Detector');
+  Create(AAlpha, TAnomalyDetectionConfig.Default);
+end;
+
+constructor TEMAAnomalyDetector.Create(AAlpha: Double; const AConfig: TAnomalyDetectionConfig);
+begin
+  inherited Create('Exponential Moving Average Detector', AConfig);
   FAlpha := AAlpha;
   FInitialized := False;
 end;
@@ -313,145 +499,195 @@ begin
   if not FInitialized then
   begin
     FCurrentMean := AValue;
-    FCurrentVariance := 0;
+    FCurrentVariance := FConfig.MinStdDev * FConfig.MinStdDev;
+    FCurrentStdDev := FConfig.MinStdDev;
     FInitialized := True;
-    FCurrentStdDev := Sqrt(FCurrentVariance);
   end
   else
   begin
+    var Delta := AValue - FCurrentMean;
+
     // Update exponential moving average
     FCurrentMean := FAlpha * AValue + (1 - FAlpha) * FCurrentMean;
-    
-    // Update variance
-    var Delta := AValue - FCurrentMean;
-    FCurrentVariance := FAlpha * Delta * Delta + (1 - FAlpha) * FCurrentVariance;
+
+    // Update variance using EMA
+    FCurrentVariance := FAlpha * (Delta * Delta) + (1 - FAlpha) * FCurrentVariance;
+
+    // Ensure minimum variance
+    if FCurrentVariance < FConfig.MinStdDev * FConfig.MinStdDev then
+      FCurrentVariance := FConfig.MinStdDev * FConfig.MinStdDev;
+
+    FCurrentStdDev := Sqrt(FCurrentVariance);
   end;
-  
-  // Calculate 3-sigma limits
-  FCurrentStdDev := Sqrt(FCurrentVariance);
-  FLowerLimit := FCurrentMean - (3 * FCurrentStdDev);
-  FUpperLimit := FCurrentMean + (3 * FCurrentStdDev);
+
+  CalculateLimits;
 end;
 
-function TEMAAnomalyDetector.IsAnomaly(const AValue: Double): Boolean;
+procedure TEMAAnomalyDetector.CalculateLimits;
 begin
-  if not FInitialized then
-    Result := False
-  else
-    Result := (AValue < FLowerLimit) or (AValue > FUpperLimit);
+  FLowerLimit := FCurrentMean - (FConfig.SigmaMultiplier * FCurrentStdDev);
+  FUpperLimit := FCurrentMean + (FConfig.SigmaMultiplier * FCurrentStdDev);
 end;
 
-function TEMAAnomalyDetector.GetAnomalyInfo(const AValue: Double): string;
+function TEMAAnomalyDetector.Detect(const AValue: Double): TAnomalyResult;
 begin
+  Result.Value := AValue;
+
   if not FInitialized then
-    Result := Format('EMA not initialized. First value: %.2f', [AValue])
-  else if IsAnomaly(AValue) then
   begin
-    if AValue < FLowerLimit then
-      Result := Format('EMA ANOMALY: Value %.2f below lower limit (%.2f)', 
-                      [AValue, FLowerLimit])
-    else
-      Result := Format('EMA ANOMALY: Value %.2f above upper limit (%.2f)', 
-                      [AValue, FUpperLimit]);
+    Result.IsAnomaly := False;
+    Result.ZScore := 0;
+    Result.LowerLimit := 0;
+    Result.UpperLimit := 0;
+    Result.Description := Format('EMA not initialized. First value: %.2f', [AValue]);
   end
   else
-    Result := Format('Normal value: %.2f (EMA: %.2f, range: %.2f - %.2f)', 
-                    [AValue, FCurrentMean, FLowerLimit, FUpperLimit]);
+  begin
+    Result.LowerLimit := FLowerLimit;
+    Result.UpperLimit := FUpperLimit;
+    Result.IsAnomaly := (AValue < FLowerLimit) or (AValue > FUpperLimit);
+
+    if FCurrentStdDev > 0 then
+      Result.ZScore := Abs(AValue - FCurrentMean) / FCurrentStdDev
+    else
+      Result.ZScore := 0;
+
+    if Result.IsAnomaly then
+    begin
+      if AValue < FLowerLimit then
+        Result.Description := Format('EMA ANOMALY: Value %.2f below lower limit (%.2f), Z-score: %.2f',
+                                    [AValue, FLowerLimit, Result.ZScore])
+      else
+        Result.Description := Format('EMA ANOMALY: Value %.2f above upper limit (%.2f), Z-score: %.2f',
+                                    [AValue, FUpperLimit, Result.ZScore]);
+    end
+    else
+      Result.Description := Format('Normal value: %.2f (EMA: %.2f, range: %.2f - %.2f), Z-score: %.2f',
+                                  [AValue, FCurrentMean, FLowerLimit, FUpperLimit, Result.ZScore]);
+  end;
 end;
 
 { TAdaptiveAnomalyDetector }
 
 constructor TAdaptiveAnomalyDetector.Create(AWindowSize: Integer; AAdaptationRate: Double);
 begin
-  inherited Create('Adaptive Detector');
-  FWindowSize := AWindowSize;
-  FAdaptationRate := AAdaptationRate;
-  FSlidingWindow := TQueue<Double>.Create;
-  FAlertThreshold := 3.0;
-  FInitialized := False;
+  Create(AWindowSize, AAdaptationRate, TAnomalyDetectionConfig.Default);
 end;
 
-destructor TAdaptiveAnomalyDetector.Destroy;
+constructor TAdaptiveAnomalyDetector.Create(AWindowSize: Integer; AAdaptationRate: Double; const AConfig: TAnomalyDetectionConfig);
 begin
-  FSlidingWindow.Free;
-  inherited Destroy;
+  inherited Create('Adaptive Detector', AConfig);
+  FWindowSize := AWindowSize;
+  FAdaptationRate := AAdaptationRate;
+  FInitialized := False;
+  FSampleCount := 0;
 end;
 
 procedure TAdaptiveAnomalyDetector.ProcessValue(const AValue: Double);
 begin
-  // Add value to sliding window
-  FSlidingWindow.Enqueue(AValue);
-  if FSlidingWindow.Count > FWindowSize then
-    FSlidingWindow.Dequeue;
-    
-  // Initialize if needed
-  if not FInitialized and (FSlidingWindow.Count > 10) then
-  begin
-    FMean := AValue;
-    FVariance := 1;
-    FInitialized := True;
-  end;
-end;
-
-procedure TAdaptiveAnomalyDetector.UpdateNormal(const AValue: Double);
-begin
   if not FInitialized then
   begin
     FMean := AValue;
-    FVariance := 1;
+    FVariance := FConfig.MinStdDev * FConfig.MinStdDev;
+    FStdDev := FConfig.MinStdDev;
     FInitialized := True;
+    FSampleCount := 1;
   end
   else
   begin
-    var ZScore := Abs(AValue - FMean) / Max(Sqrt(FVariance), 0.001);
-    if ZScore <= FAlertThreshold then
-    begin
-      // Value is normal, gradually update parameters
-      FMean := FMean + FAdaptationRate * (AValue - FMean);
-      var NewVariance := FVariance + FAdaptationRate * (Power(AValue - FMean, 2) - FVariance);
-      FVariance := Max(NewVariance, 0.1); // Prevent variance from becoming too small
-    end;
+    Inc(FSampleCount);
+
+    // If not an anomaly, update statistics
+    if not IsAnomaly(AValue) then
+      UpdateNormal(AValue);
   end;
+
+  CalculateLimits;
 end;
 
-function TAdaptiveAnomalyDetector.IsAnomaly(const AValue: Double): Boolean;
+procedure TAdaptiveAnomalyDetector.UpdateNormal(const AValue: Double);
+var
+  Delta: Double;
+  NewMean: Double;
+  NewVariance: Double;
 begin
   if not FInitialized then
-    Result := False
+  begin
+    FMean := AValue;
+    FVariance := FConfig.MinStdDev * FConfig.MinStdDev;
+    FStdDev := FConfig.MinStdDev;
+    FInitialized := True;
+    FSampleCount := 1;
+  end
   else
   begin
-    var StdDev := Max(Sqrt(FVariance), 0.001);
-    var ZScore := Abs(AValue - FMean) / StdDev;
-    Result := ZScore > FAlertThreshold;
+    // Welford's online algorithm adapted for exponential weighting
+    Delta := AValue - FMean;
+    NewMean := FMean + FAdaptationRate * Delta;
+    NewVariance := (1 - FAdaptationRate) * FVariance + FAdaptationRate * Delta * (AValue - NewMean);
+
+    FMean := NewMean;
+    FVariance := NewVariance;
+
+    // Ensure minimum variance
+    if FVariance < FConfig.MinStdDev * FConfig.MinStdDev then
+      FVariance := FConfig.MinStdDev * FConfig.MinStdDev;
+
+    FStdDev := Sqrt(FVariance);
   end;
+
+  CalculateLimits;
 end;
 
-function TAdaptiveAnomalyDetector.GetAnomalyInfo(const AValue: Double): string;
+procedure TAdaptiveAnomalyDetector.CalculateLimits;
 begin
+  // Dynamic limits based on current statistics
+  // Note: Limits are calculated dynamically in Detect method
+  // This method is kept for interface consistency
+end;
+
+function TAdaptiveAnomalyDetector.Detect(const AValue: Double): TAnomalyResult;
+begin
+  Result.Value := AValue;
+
   if not FInitialized then
-    Result := Format('Adaptive detector not initialized. First value: %.2f', [AValue])
+  begin
+    Result.IsAnomaly := False;
+    Result.ZScore := 0;
+    Result.LowerLimit := 0;
+    Result.UpperLimit := 0;
+    Result.Description := Format('Adaptive detector not initialized. First value: %.2f', [AValue]);
+  end
   else
   begin
-    var StdDev := Max(Sqrt(FVariance), 0.001);
-    var ZScore := Abs(AValue - FMean) / StdDev;
-    
-    if IsAnomaly(AValue) then
-      Result := Format('ADAPTIVE ANOMALY: Value %.2f (Z-score: %.2f, threshold: %.2f)', 
-                      [AValue, ZScore, FAlertThreshold])
+    Result.LowerLimit := FMean - (FConfig.SigmaMultiplier * FStdDev);
+    Result.UpperLimit := FMean + (FConfig.SigmaMultiplier * FStdDev);
+
+    if FStdDev > 0 then
+      Result.ZScore := Abs(AValue - FMean) / FStdDev
     else
-      Result := Format('Normal value: %.2f (Z-score: %.2f, mean: %.2f)', 
-                      [AValue, ZScore, FMean]);
+      Result.ZScore := 0;
+
+    Result.IsAnomaly := Result.ZScore > FConfig.SigmaMultiplier;
+
+    if Result.IsAnomaly then
+      Result.Description := Format('ADAPTIVE ANOMALY: Value %.2f (Z-score: %.2f, threshold: %.2f)',
+                                  [AValue, Result.ZScore, FConfig.SigmaMultiplier])
+    else
+      Result.Description := Format('Normal value: %.2f (Z-score: %.2f, mean: %.2f, stddev: %.2f)',
+                                  [AValue, Result.ZScore, FMean, FStdDev]);
   end;
 end;
 
 { TAnomalyConfirmationSystem }
 
-constructor TAnomalyConfirmationSystem.Create(AWindowSize: Integer; AConfirmationThreshold: Integer);
+constructor TAnomalyConfirmationSystem.Create(AWindowSize: Integer; AConfirmationThreshold: Integer; ATolerance: Double);
 begin
   inherited Create;
   FWindowSize := AWindowSize;
   FConfirmationThreshold := AConfirmationThreshold;
-  FRecentAnomalies := TQueue<Double>.Create;
+  FTolerance := ATolerance;
+  FRecentAnomalies := TList<Double>.Create;
 end;
 
 destructor TAnomalyConfirmationSystem.Destroy;
@@ -462,25 +698,29 @@ end;
 
 procedure TAnomalyConfirmationSystem.AddPotentialAnomaly(const AValue: Double);
 begin
-  FRecentAnomalies.Enqueue(AValue);
-  if FRecentAnomalies.Count > FWindowSize then
-    FRecentAnomalies.Dequeue;
+  FRecentAnomalies.Add(AValue);
+
+  // Keep only recent anomalies
+  while FRecentAnomalies.Count > FWindowSize do
+    FRecentAnomalies.Delete(0);
 end;
 
 function TAnomalyConfirmationSystem.IsConfirmedAnomaly(const AValue: Double): Boolean;
 var
   AnomalyCount: Integer;
-  RecentValue: Double;
+  i: Integer;
+  ToleranceValue: Double;
 begin
   AnomalyCount := 0;
-  
+  ToleranceValue := Max(Abs(AValue), 1) * FTolerance;
+
   // Count how many similar anomalies occurred recently
-  for RecentValue in FRecentAnomalies do
+  for i := 0 to FRecentAnomalies.Count - 1 do
   begin
-    if Abs(RecentValue - AValue) < (Max(Abs(AValue), 1) * 0.1) then // 10% tolerance
+    if Abs(FRecentAnomalies[i] - AValue) < ToleranceValue then
       Inc(AnomalyCount);
   end;
-  
+
   Result := AnomalyCount >= FConfirmationThreshold;
 end;
 
