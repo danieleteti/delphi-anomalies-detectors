@@ -1,3 +1,23 @@
+// ***************************************************************************
+//
+// Copyright (c) 2025 Daniele Teti - All Rights Reserved
+//
+// Unauthorized copying, distribution or use of this software, via any medium,
+// is strictly prohibited without the prior written consent of the copyright
+// holder. This software is proprietary and confidential.
+//
+// This demo application is provided exclusively to showcase the capabilities
+// of the Anomaly Detection Algorithms Library and is intended for evaluation
+// purposes only.
+//
+// To use this library in a commercial project, a separate commercial license
+// must be purchased. For licensing information, please contact:
+//   Daniele Teti
+//   Email: d.teti@bittime.it
+//   Website: https://www.bittimeprofessionals.com
+//
+// ***************************************************************************
+
 unit AnomalyDetectionAlgorithms;
 
 {
