@@ -1,4 +1,4 @@
-﻿// ***************************************************************************
+﻿ // ***************************************************************************
 //
 // Copyright (c) 2025 Daniele Teti - All Rights Reserved
 //
@@ -664,6 +664,7 @@ end;
 
 var
   Choice: Integer;
+  RunAll: Boolean;
   InputStr: string;
 
 begin
@@ -672,6 +673,7 @@ begin
     SetConsoleColor(COLOR_NORMAL);
 
     WriteColoredLine('Anomaly Detection Algorithms Demo', COLOR_SUCCESS);
+    WriteColoredLine('Developed with Delphi - Domain Modeling Pattern', COLOR_INFO);
     WriteLn(StringOfChar('=', 50));
     WriteLn;
     WriteLn('This demo shows various algorithms for detecting anomalies in data.');
@@ -692,12 +694,14 @@ begin
         5: TestAnomalyConfirmationSystem;
         6: TestRealWorldScenario;
         7: begin
+             RunAll := True;
              TestThreeSigmaDetector;
              TestSlidingWindowDetector;
              TestEMADetector;
              TestAdaptiveDetector;
              TestAnomalyConfirmationSystem;
              TestRealWorldScenario;
+             RunAll := False;
            end;
         0: WriteLn('Goodbye!');
       else
