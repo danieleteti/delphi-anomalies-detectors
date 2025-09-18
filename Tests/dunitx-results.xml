@@ -1,0 +1,77 @@
+﻿<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<test-results name="C:\DEV\delphi-anomalies-detectors\Tests\AnomalyDetectionTestRunner.exe" total="37" errors="0" failures="0" ignored="0" inconclusive="0" not-run="0" skipped="0" invalid="0" date="2025-09-18" time="13:43:47">
+  <culture-info current-culture="en" current-uiculture="en" />
+  <test-suite type="Assembly" name="AnomalyDetectionTestRunner.exe" executed="true" result="Success" success="True" time="13:43:47" asserts="0">
+    <results>
+        <test-suite type="Namespace" name="AnomalyDetectionAlgorithmsTests" executed="true" result="Success" success="True" time="2.327" asserts="0" >
+          <results>
+              <test-suite type="Fixture" name="TAdaptiveAnomalyDetectorTests" executed="True" result="Success" success="True" time="0.001" >
+                <results>
+                  <test-case name="TestInitialState" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                  <test-case name="TestLearningFromNormalValues" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                  <test-case name="TestRejectingAnomalies" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                  <test-case name="TestGradualTrendAdaptation" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                  <test-case name="TestAdaptationRate" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                  <test-case name="TestAnomalyThreshold" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                </results>
+              </test-suite>
+              <test-suite type="Fixture" name="TAnomalyConfirmationSystemTests" executed="True" result="Success" success="True" time="0.001" >
+                <results>
+                  <test-case name="TestIsolatedAnomaly" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                  <test-case name="TestConfirmedAnomalyPattern" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                  <test-case name="TestToleranceParameter" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                  <test-case name="TestWindowSizeLimit" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                  <test-case name="TestDifferentAnomalies" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                  <test-case name="TestThresholdBehavior" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                </results>
+              </test-suite>
+              <test-suite type="Fixture" name="TAnomalyDetectionConfigTests" executed="True" result="Success" success="True" time="0.000" >
+                <results>
+                  <test-case name="TestDefaultConfig" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                  <test-case name="TestCustomConfig" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                </results>
+              </test-suite>
+              <test-suite type="Fixture" name="TEMAAnomalyDetectorTests" executed="True" result="Success" success="True" time="0.000" >
+                <results>
+                  <test-case name="TestInitialization" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                  <test-case name="TestAlphaParameter" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                  <test-case name="TestRapidAdaptation" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                  <test-case name="TestSlowAdaptation" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                  <test-case name="TestAnomalyDetection" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                  <test-case name="TestVarianceUpdate" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                </results>
+              </test-suite>
+              <test-suite type="Fixture" name="TIntegrationTests" executed="True" result="Success" success="True" time="0.075" >
+                <results>
+                  <test-case name="TestEnsembleDetection" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                  <test-case name="TestRealWorldScenario" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                  <test-case name="TestPerformanceUnderLoad" executed="True" result="Success" success="True" time="0.080" asserts="0" />
+                </results>
+              </test-suite>
+              <test-suite type="Fixture" name="TSlidingWindowDetectorTests" executed="True" result="Success" success="True" time="0.002" >
+                <results>
+                  <test-case name="TestEmptyWindow" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                  <test-case name="TestWindowFilling" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                  <test-case name="TestWindowSliding" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                  <test-case name="TestIncrementalStatistics" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                  <test-case name="TestAnomalyDetectionInStream" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                  <test-case name="TestCustomWindowSize" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                  <test-case name="TestTrendAdaptation" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                </results>
+              </test-suite>
+              <test-suite type="Fixture" name="TThreeSigmaDetectorTests" executed="True" result="Success" success="True" time="2.248" >
+                <results>
+                  <test-case name="TestNoDataException" executed="True" result="Success" success="True" time="1.590" asserts="0" />
+                  <test-case name="TestSingleDataPointException" executed="True" result="Success" success="True" time="0.658" asserts="0" />
+                  <test-case name="TestNormalData" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                  <test-case name="TestAnomalyDetection" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                  <test-case name="TestCustomSigmaMultiplier" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                  <test-case name="TestZeroVarianceData" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                  <test-case name="TestStatisticsCalculation" executed="True" result="Success" success="True" time="0.000" asserts="0" />
+                </results>
+              </test-suite>
+          </results>
+        </test-suite>
+    </results>
+  </test-suite>
+</test-results>

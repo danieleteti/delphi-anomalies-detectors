@@ -1,23 +1,3 @@
-// ***************************************************************************
-//
-// Copyright (c) 2025 Daniele Teti - All Rights Reserved
-//
-// Unauthorized copying, distribution or use of this software, via any medium,
-// is strictly prohibited without the prior written consent of the copyright
-// holder. This software is proprietary and confidential.
-//
-// This demo application is provided exclusively to showcase the capabilities
-// of the Anomaly Detection Algorithms Library and is intended for evaluation
-// purposes only.
-//
-// To use this library in a commercial project, a separate commercial license
-// must be purchased. For licensing information, please contact:
-//   Daniele Teti
-//   Email: d.teti@bittime.it
-//   Website: https://www.bittimeprofessionals.com
-//
-// ***************************************************************************
-
 unit AnomalyDetectionAlgorithms;
 
 {
@@ -35,7 +15,8 @@ unit AnomalyDetectionAlgorithms;
 interface
 
 uses
-  System.SysUtils, System.Classes, System.Math, System.Generics.Collections;
+  System.SysUtils, System.Classes, System.Math, System.Generics.Collections,
+  System.SyncObjs;
 
 type
   /// <summary>
@@ -66,9 +47,11 @@ type
   protected
     FName: string;
     FConfig: TAnomalyDetectionConfig;
+    FLock: TCriticalSection;
   public
     constructor Create(const AName: string); overload;
     constructor Create(const AName: string; const AConfig: TAnomalyDetectionConfig); overload;
+    destructor Destroy; override;
     function Detect(const AValue: Double): TAnomalyResult; virtual; abstract;
     function IsAnomaly(const AValue: Double): Boolean; virtual;
     function GetAnomalyInfo(const AValue: Double): string; virtual;
@@ -219,6 +202,13 @@ begin
   inherited Create;
   FName := AName;
   FConfig := AConfig;
+  FLock := TCriticalSection.Create;
+end;
+
+destructor TBaseAnomalyDetector.Destroy;
+begin
+  FLock.Free;
+  inherited;
 end;
 
 function TBaseAnomalyDetector.IsAnomaly(const AValue: Double): Boolean;

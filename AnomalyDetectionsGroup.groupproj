@@ -1,0 +1,48 @@
+﻿<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+    <PropertyGroup>
+        <ProjectGuid>{05EA1FDB-B01E-4FA9-B40C-EE71A3875C96}</ProjectGuid>
+    </PropertyGroup>
+    <ItemGroup>
+        <Projects Include="Samples\AnomalyDetectionDemo.dproj">
+            <Dependencies/>
+        </Projects>
+        <Projects Include="Tests\AnomalyDetectionTestRunner.dproj">
+            <Dependencies/>
+        </Projects>
+    </ItemGroup>
+    <ProjectExtensions>
+        <Borland.Personality>Default.Personality.12</Borland.Personality>
+        <Borland.ProjectType/>
+        <BorlandProject>
+            <Default.Personality/>
+        </BorlandProject>
+    </ProjectExtensions>
+    <Target Name="AnomalyDetectionDemo">
+        <MSBuild Projects="Samples\AnomalyDetectionDemo.dproj"/>
+    </Target>
+    <Target Name="AnomalyDetectionDemo:Clean">
+        <MSBuild Projects="Samples\AnomalyDetectionDemo.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="AnomalyDetectionDemo:Make">
+        <MSBuild Projects="Samples\AnomalyDetectionDemo.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="AnomalyDetectionTestRunner">
+        <MSBuild Projects="Tests\AnomalyDetectionTestRunner.dproj"/>
+    </Target>
+    <Target Name="AnomalyDetectionTestRunner:Clean">
+        <MSBuild Projects="Tests\AnomalyDetectionTestRunner.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="AnomalyDetectionTestRunner:Make">
+        <MSBuild Projects="Tests\AnomalyDetectionTestRunner.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="Build">
+        <CallTarget Targets="AnomalyDetectionDemo;AnomalyDetectionTestRunner"/>
+    </Target>
+    <Target Name="Clean">
+        <CallTarget Targets="AnomalyDetectionDemo:Clean;AnomalyDetectionTestRunner:Clean"/>
+    </Target>
+    <Target Name="Make">
+        <CallTarget Targets="AnomalyDetectionDemo:Make;AnomalyDetectionTestRunner:Make"/>
+    </Target>
+    <Import Project="$(BDS)\Bin\CodeGear.Group.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Group.Targets')"/>
+</Project>
