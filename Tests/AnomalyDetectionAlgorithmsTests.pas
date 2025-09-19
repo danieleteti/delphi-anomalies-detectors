@@ -448,7 +448,10 @@ procedure TSlidingWindowDetectorTests.TestAnomalyDetectionInStream;
 var
   i: Integer;
   Result: TAnomalyResult;
+  AnomalyCount: Integer;
 begin
+  AnomalyCount := 0;
+
   // Stream normal data
   for i := 1 to 50 do
   begin
@@ -849,6 +852,8 @@ begin
 end;
 
 procedure TAnomalyConfirmationSystemTests.TestToleranceParameter;
+var
+  i: Integer;
 begin
   // Add anomalies with 10% tolerance
   FSystem.AddPotentialAnomaly(100);

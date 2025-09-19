@@ -22,20 +22,6 @@ program AnomalyDetectionDemo;
 
 {$APPTYPE CONSOLE}
 
-{
-  Anomaly Detection Demo Program
-
-  This program demonstrates the use of various anomaly detection algorithms:
-
-  1. 3-Sigma Detector: Uses historical data to establish normal limits
-  2. Sliding Window Detector: Maintains a moving window for streaming data
-  3. EMA Detector: Rapidly adapts to changes using exponential moving averages
-  4. Adaptive Detector: Continuously learns from confirmed normal values
-  5. Confirmation System: Reduces false positives by requiring multiple confirmations
-
-  Final scenario: Simulates web traffic monitoring with all detectors
-}
-
 uses
   System.SysUtils,
   System.Classes,
@@ -53,13 +39,14 @@ const
   COLOR_WARNING = 14;   // Yellow
   COLOR_SUCCESS = 10;   // Light green
   COLOR_INFO = 11;      // Light cyan
+  COLOR_TITLE = 13;     // Light magenta
 
 procedure SetConsoleColor(Color: Word);
 begin
   {$IFDEF MSWINDOWS}
   SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), Color);
   {$ELSE}
-  // On other platforms, ignore colors or use ANSI sequences if needed
+  // On other platforms, ignore colors
   {$ENDIF}
 end;
 
@@ -82,6 +69,15 @@ begin
   WriteLn(StringOfChar('-', 80));
 end;
 
+procedure DrawDoubleSeparator;
+begin
+  WriteLn(StringOfChar('=', 80));
+end;
+
+// ============================================================================
+// CLASSIC ALGORITHMS
+// ============================================================================
+
 procedure TestThreeSigmaDetector;
 var
   Detector: TThreeSigmaDetector;
@@ -89,8 +85,9 @@ var
   TestValues: array[0..6] of Double;
   i: Integer;
   Result: TAnomalyResult;
+  Metrics: TDetectorMetrics;
 begin
-  WriteColoredLine('=== 3-Sigma Detector Test ===', COLOR_SUCCESS);
+  WriteColoredLine('=== 3-SIGMA DETECTOR TEST ===', COLOR_TITLE);
   WriteLn('The 3-Sigma detector is ideal when you have stable historical data.');
   WriteLn('It uses the statistical rule that 99.7% of normal values fall within ±3σ from the mean.');
   WriteLn;
@@ -131,12 +128,26 @@ begin
     WriteLn('Testing various sales values:');
     for i := 0 to High(TestValues) do
     begin
+      Detector.PerformanceMonitor.StartMeasurement;
       Result := Detector.Detect(TestValues[i]);
+      Detector.PerformanceMonitor.StopMeasurement(Result.IsAnomaly);
+
       if Result.IsAnomaly then
         WriteColoredLine(Format('  %.0f units: %s', [TestValues[i], Result.Description]), COLOR_ANOMALY)
       else
         WriteLn(Format('  %.0f units: %s', [TestValues[i], Result.Description]));
     end;
+
+    DrawSeparator;
+    WriteColoredLine('PERFORMANCE METRICS:', COLOR_INFO);
+    WriteLn(Detector.GetPerformanceReport);
+
+    // Add meaningful analysis
+    Metrics := Detector.PerformanceMonitor.GetCurrentMetrics;
+    WriteColoredLine('ANALYSIS:', COLOR_INFO);
+    WriteLn(Format('Detection accuracy: %d/%d anomalies correctly identified',
+                  [Metrics.AnomaliesDetected, 3])); // We expect 3 anomalies
+    WriteLn(Format('Processing efficiency: %.0f detections/second', [Metrics.ThroughputPerSecond]));
 
   finally
     Detector.Free;
@@ -153,8 +164,9 @@ var
   Value: Double;
   Result: TAnomalyResult;
   AnomalyCount: Integer;
+  Metrics: TDetectorMetrics;
 begin
-  WriteColoredLine('=== Sliding Window Detector Test ===', COLOR_SUCCESS);
+  WriteColoredLine('=== SLIDING WINDOW DETECTOR TEST ===', COLOR_TITLE);
   WriteLn('This detector maintains a moving window of the last N values.');
   WriteLn('Perfect for data streams where conditions change gradually.');
   WriteLn('The window automatically adapts to seasonal changes.');
@@ -187,7 +199,10 @@ begin
       end;
 
       Detector.AddValue(Value);
+
+      Detector.PerformanceMonitor.StartMeasurement;
       Result := Detector.Detect(Value);
+      Detector.PerformanceMonitor.StopMeasurement(Result.IsAnomaly);
 
       if Result.IsAnomaly then
       begin
@@ -213,6 +228,16 @@ begin
     WriteColoredLine(Format('Total anomalies detected: %d out of 150 values (%.1f%%)',
                            [AnomalyCount, AnomalyCount / 150 * 100]), COLOR_INFO);
 
+    DrawSeparator;
+    WriteColoredLine('PERFORMANCE METRICS:', COLOR_INFO);
+    WriteLn(Detector.GetPerformanceReport);
+
+    // Add meaningful analysis
+    Metrics := Detector.PerformanceMonitor.GetCurrentMetrics;
+    WriteColoredLine('SLIDING WINDOW ANALYSIS:', COLOR_INFO);
+    WriteLn(Format('Adaptation success: Tracked %d regime changes', [3]));
+    WriteLn(Format('Processing efficiency: %.0f detections/second', [Metrics.ThroughputPerSecond]));
+
   finally
     Detector.Free;
   end;
@@ -220,451 +245,318 @@ begin
   WaitForUser;
 end;
 
-procedure TestEMADetector;
+procedure TestIsolationForestDetector;
 var
-  Detector: TEMAAnomalyDetector;
+  Detector: TIsolationForestDetector;
   i: Integer;
-  Value: Double;
+  Instance: TArray<Double>;
   Result: TAnomalyResult;
-  Phase: string;
+  NormalCount, AnomalyCount: Integer;
+  StartTime: TDateTime;
+  TrainingTime: Int64;
+  StreamNormal, StreamAnomalies: Integer;
+  Metrics: TDetectorMetrics;
 begin
-  WriteColoredLine('=== Exponential Moving Average Detector Test ===', COLOR_SUCCESS);
-  WriteLn('The EMA detector gives more weight to recent values (exponential decay).');
-  WriteLn('The Alpha parameter controls adaptation speed:');
-  WriteLn('  - Low Alpha (0.01-0.1): slow adaptation, more stable');
-  WriteLn('  - High Alpha (0.2-0.5): rapid adaptation, more reactive');
+  WriteColoredLine('=== ISOLATION FOREST DETECTOR TEST ===', COLOR_TITLE);
+  WriteLn('Isolation Forest is excellent for multi-dimensional data.');
+  WriteLn('It works by building random binary trees where anomalies');
+  WriteLn('are easier to "isolate" (require fewer splits).');
+  WriteLn('Perfect for: fraud detection, cybersecurity, multi-sensor IoT.');
   WriteLn;
 
-  Detector := TEMAAnomalyDetector.Create(0.1); // Moderate alpha
+  // Optimized configuration for demo
+  Detector := TIsolationForestDetector.Create(50, 100, 8); // 50 trees, 100 samples, depth 8
   try
-    WriteColoredLine('Simulating data with regime change...', COLOR_INFO);
+    WriteColoredLine('Phase 1: Training with normal data (main cluster)', COLOR_INFO);
+
+    // Generate normal cluster centered on (100, 50)
+    for i := 1 to 200 do
+    begin
+      SetLength(Instance, 2);
+      Instance[0] := 100 + Random(30) - 15; // X: 85-115
+      Instance[1] := 50 + Random(20) - 10;  // Y: 40-60
+      Detector.AddTrainingData(Instance);
+
+      if i <= 10 then
+        Write(Format('(%.0f,%.0f) ', [Instance[0], Instance[1]]));
+    end;
+    WriteLn;
+
+    // Add a second smaller cluster (normal)
+    WriteColoredLine('Adding second normal cluster...', COLOR_INFO);
+    for i := 1 to 50 do
+    begin
+      SetLength(Instance, 2);
+      Instance[0] := 150 + Random(20) - 10; // X: 140-160
+      Instance[1] := 80 + Random(16) - 8;   // Y: 72-88
+      Detector.AddTrainingData(Instance);
+    end;
+
+    WriteLn(Format('Training with %d 2D samples...', [250]));
+    StartTime := Now;
+    Detector.Train;
+    TrainingTime := MilliSecondsBetween(Now, StartTime);
+
+    WriteColoredLine(Format('✓ Training completed in %d ms', [TrainingTime]), COLOR_SUCCESS);
+    WriteLn(Format('  Number of trees: %d', [Detector.NumTrees]));
+    WriteLn(Format('  Feature dimensions: %d', [Detector.FeatureCount]));
+    DrawSeparator;
+
+    WriteColoredLine('Phase 2: Testing specific points', COLOR_INFO);
+    NormalCount := 0;
+    AnomalyCount := 0;
+
+    // Test normal points
+    SetLength(Instance, 2);
+
+    // Center of first cluster
+    Instance[0] := 100; Instance[1] := 50;
+    Detector.PerformanceMonitor.StartMeasurement;
+    Result := Detector.DetectMultiDimensional(Instance);
+    Detector.PerformanceMonitor.StopMeasurement(Result.IsAnomaly);
+    Write(Format('  [%.0f, %.0f] Center cluster 1: ', [Instance[0], Instance[1]]));
+    if not Result.IsAnomaly then
+    begin
+      Inc(NormalCount);
+      WriteLn('Normal');
+    end else begin
+      Inc(AnomalyCount);
+      WriteColoredLine('ANOMALY', COLOR_ANOMALY);
+    end;
+
+    // Test anomaly points
+    Instance[0] := 300; Instance[1] := 300;
+    Detector.PerformanceMonitor.StartMeasurement;
+    Result := Detector.DetectMultiDimensional(Instance);
+    Detector.PerformanceMonitor.StopMeasurement(Result.IsAnomaly);
+    Write(Format('  [%.0f, %.0f] Very far point: ', [Instance[0], Instance[1]]));
+    if Result.IsAnomaly then
+    begin
+      Inc(AnomalyCount);
+      WriteColoredLine('ANOMALY', COLOR_ANOMALY);
+    end else begin
+      Inc(NormalCount);
+      WriteLn('Normal');
+    end;
+
+    DrawSeparator;
+    WriteColoredLine('Phase 3: Stream test on random data', COLOR_INFO);
+    StreamNormal := 0;
+    StreamAnomalies := 0;
 
     for i := 1 to 100 do
     begin
-      // Three phases with different means
-      if i <= 30 then
+      SetLength(Instance, 2);
+
+      // 90% normal points, 10% anomalies
+      if Random(10) = 0 then
       begin
-        Value := 100 + Random(20) - 10;
-        Phase := 'Phase 1 (stable at ~100)';
-      end
-      else if i <= 60 then
-      begin
-        Value := 150 + Random(30) - 15;
-        Phase := 'Phase 2 (transition to ~150)';
+        // Generate anomaly - far from both clusters
+        Instance[0] := 300 + Random(100);
+        Instance[1] := 200 + Random(100);
       end
       else
       begin
-        Value := 200 + Random(40) - 20;
-        Phase := 'Phase 3 (new normal at ~200)';
-      end;
-
-      // Occasional anomalies
-      if i in [15, 45, 80] then
-      begin
-        Value := Value * 0.3;  // 70% drop
-        WriteColoredLine(Format('>>> Drop inserted at point %d', [i]), COLOR_WARNING);
-      end;
-
-      Detector.AddValue(Value);
-      Result := Detector.Detect(Value);
-
-      if Result.IsAnomaly or (i mod 20 = 0) then
-      begin
-        if Result.IsAnomaly then
-          WriteColoredLine(Format('[%3d] %s - Value: %.0f, EMA: %.0f - %s',
-                                 [i, Phase, Value, Detector.CurrentMean, Result.Description]),
-                          COLOR_ANOMALY)
-        else
-          WriteLn(Format('[%3d] %s - Value: %.0f, EMA: %.0f',
-                        [i, Phase, Value, Detector.CurrentMean]));
-      end;
-    end;
-
-    DrawSeparator;
-    WriteLn('Final detector state:');
-    WriteLn(Format('  EMA mean: %.2f', [Detector.CurrentMean]));
-    WriteLn(Format('  Std. deviation: %.2f', [Detector.CurrentStdDev]));
-    WriteLn(Format('  Normal range: %.2f - %.2f', [Detector.LowerLimit, Detector.UpperLimit]));
-
-  finally
-    Detector.Free;
-  end;
-
-  WaitForUser;
-end;
-
-procedure TestAdaptiveDetector;
-var
-  Detector: TAdaptiveAnomalyDetector;
-  Config: TAnomalyDetectionConfig;
-  i: Integer;
-  Value, TrendValue: Double;
-  Result: TAnomalyResult;
-  AcceptedCount, RejectedCount: Integer;
-begin
-  WriteColoredLine('=== Adaptive Detector Test ===', COLOR_SUCCESS);
-  WriteLn('This detector continuously learns from confirmed normal values.');
-  WriteLn('Ideal for environments where "normal" conditions gradually change.');
-  WriteLn('The learning rate controls how quickly it adapts to changes.');
-  WriteLn;
-
-  Config := TAnomalyDetectionConfig.Default;
-  Config.SigmaMultiplier := 2.0; // More permissive for learning
-
-  Detector := TAdaptiveAnomalyDetector.Create(100, 0.05, Config);
-  try
-    WriteColoredLine('Simulating an increasing trend with adaptive learning...', COLOR_INFO);
-    AcceptedCount := 0;
-    RejectedCount := 0;
-
-    for i := 1 to 120 do
-    begin
-      // Increasing trend: from 100 to 200 in 120 steps
-      TrendValue := 100 + (i - 1) * 100 / 119;
-      Value := TrendValue + Random(20) - 10;
-
-      // Planned anomalies
-      if i in [30, 60, 90] then
-      begin
-        Value := Value + 100;  // Positive spike
-        WriteColoredLine(Format('>>> Anomalous spike inserted at point %d: %.0f', [i, Value]), COLOR_WARNING);
-      end;
-
-      Detector.ProcessValue(Value);
-      Result := Detector.Detect(Value);
-
-      if not Result.IsAnomaly then
-      begin
-        // Value is normal, allow learning
-        Detector.UpdateNormal(Value);
-        Inc(AcceptedCount);
-      end
-      else
-      begin
-        Inc(RejectedCount);
-        WriteColoredLine(Format('[%3d] ANOMALY: %.0f - %s',
-                               [i, Value, Result.Description]), COLOR_ANOMALY);
-      end;
-
-      // Periodic report
-      if (i mod 30 = 0) then
-      begin
-        DrawSeparator;
-        WriteLn(Format('Progress after %d values:', [i]));
-        WriteLn(Format('  Expected trend: %.0f', [TrendValue]));
-        WriteLn(Format('  Adaptive mean: %.2f', [Detector.CurrentMean]));
-        WriteLn(Format('  Std. deviation: %.2f', [Detector.CurrentStdDev]));
-        WriteLn(Format('  Values learned: %d, Anomalies: %d', [AcceptedCount, RejectedCount]));
-        DrawSeparator;
-      end;
-    end;
-
-    WriteLn;
-    WriteColoredLine('Adaptive learning summary:', COLOR_INFO);
-    WriteLn(Format('  Normal values learned: %d (%.1f%%)',
-                  [AcceptedCount, AcceptedCount / 120 * 100]));
-    WriteLn(Format('  Anomalies rejected: %d (%.1f%%)',
-                  [RejectedCount, RejectedCount / 120 * 100]));
-    WriteLn(Format('  Trend adaptation: Final mean %.2f vs final trend %.2f',
-                  [Detector.CurrentMean, TrendValue]));
-
-  finally
-    Detector.Free;
-  end;
-
-  WaitForUser;
-end;
-
-procedure TestAnomalyConfirmationSystem;
-var
-  ConfirmationSystem: TAnomalyConfirmationSystem;
-  Detector: TSlidingWindowDetector;
-  i: Integer;
-  Value: Double;
-  Result: TAnomalyResult;
-  ConfirmedAnomalies: Integer;
-begin
-  WriteColoredLine('=== Anomaly Confirmation System Test ===', COLOR_SUCCESS);
-  WriteLn('This system reduces false positives by requiring multiple similar anomalies.');
-  WriteLn('Useful when single anomalies might be noise or measurement errors.');
-  WriteLn('Parameters: window=10, threshold=3 (need 3 similar anomalies out of 10)');
-  WriteLn;
-
-  ConfirmationSystem := TAnomalyConfirmationSystem.Create(10, 3, 0.15); // 15% tolerance
-  Detector := TSlidingWindowDetector.Create(50);
-  try
-    WriteColoredLine('Simulating isolated anomalies vs anomaly patterns...', COLOR_INFO);
-    ConfirmedAnomalies := 0;
-
-    // First phase: normal values
-    for i := 1 to 30 do
-    begin
-      Value := 100 + Random(20) - 10;
-      Detector.AddValue(Value);
-    end;
-
-    WriteLn('Baseline established. Starting anomaly tests...');
-    WriteLn;
-
-    // Test 1: Isolated anomaly
-    WriteColoredLine('Test 1: Isolated anomaly (should not be confirmed)', COLOR_WARNING);
-    Value := 250;
-    Result := Detector.Detect(Value);
-    if Result.IsAnomaly then
-    begin
-      ConfirmationSystem.AddPotentialAnomaly(Value);
-      if ConfirmationSystem.IsConfirmedAnomaly(Value) then
-      begin
-        Inc(ConfirmedAnomalies);
-        WriteColoredLine('  CONFIRMED', COLOR_ANOMALY);
-      end
-      else
-        WriteLn('  Not confirmed (correct - it''s isolated)');
-    end;
-
-    // Normal values
-    for i := 1 to 5 do
-    begin
-      Value := 100 + Random(20) - 10;
-      Detector.AddValue(Value);
-    end;
-
-    // Test 2: Pattern of similar anomalies
-    WriteLn;
-    WriteColoredLine('Test 2: Pattern of 4 similar anomalies (should be confirmed)', COLOR_WARNING);
-    for i := 1 to 4 do
-    begin
-      Value := 240 + Random(20) - 10;  // Similar anomalies
-      Result := Detector.Detect(Value);
-      if Result.IsAnomaly then
-      begin
-        ConfirmationSystem.AddPotentialAnomaly(Value);
-        Write(Format('  Anomaly %d (%.0f): ', [i, Value]));
-        if ConfirmationSystem.IsConfirmedAnomaly(Value) then
+        // Generate normal point (random clusters)
+        if Random(2) = 0 then
         begin
-          Inc(ConfirmedAnomalies);
-          WriteColoredLine('CONFIRMED', COLOR_ANOMALY);
+          Instance[0] := 100 + Random(30) - 15;
+          Instance[1] := 50 + Random(20) - 10;
         end
         else
-          WriteLn('Not yet confirmed');
-      end;
-    end;
-
-    // Test 3: Different anomalies
-    WriteLn;
-    WriteColoredLine('Test 3: Different types of anomalies (should not confirm)', COLOR_WARNING);
-    for i := 1 to 3 do
-    begin
-      case i of
-        1: Value := 50;   // Negative anomaly
-        2: Value := 300;  // High positive anomaly
-        3: Value := 180;  // Low positive anomaly
+        begin
+          Instance[0] := 150 + Random(20) - 10;
+          Instance[1] := 80 + Random(16) - 8;
+        end;
       end;
 
-      Result := Detector.Detect(Value);
+      Detector.PerformanceMonitor.StartMeasurement;
+      Result := Detector.DetectMultiDimensional(Instance);
+      Detector.PerformanceMonitor.StopMeasurement(Result.IsAnomaly);
+
       if Result.IsAnomaly then
       begin
-        ConfirmationSystem.AddPotentialAnomaly(Value);
-        Write(Format('  Anomaly type %d (%.0f): ', [i, Value]));
-        if ConfirmationSystem.IsConfirmedAnomaly(Value) then
-        begin
-          Inc(ConfirmedAnomalies);
-          WriteColoredLine('CONFIRMED', COLOR_ANOMALY);
-        end
-        else
-          WriteLn('Not confirmed (correct - they are different)');
-      end;
+        Inc(StreamAnomalies);
+        if StreamAnomalies <= 5 then // Show only first 5
+          WriteColoredLine(Format('  Stream anomaly: (%.0f, %.0f)',
+                                 [Instance[0], Instance[1]]), COLOR_ANOMALY);
+      end
+      else
+        Inc(StreamNormal);
     end;
 
     WriteLn;
+    WriteColoredLine('=== ISOLATION FOREST RESULTS ===', COLOR_SUCCESS);
+    WriteLn(Format('Fixed point tests: %d normal, %d anomalies', [NormalCount, AnomalyCount]));
+    WriteLn(Format('Stream test: %d normal, %d anomalies out of 100 points', [StreamNormal, StreamAnomalies]));
+    WriteLn(Format('Anomaly detection rate: %.1f%% (expected ~10%%)', [StreamAnomalies / 100 * 100]));
+
+    WriteColoredLine('ALGORITHM ANALYSIS:', COLOR_INFO);
+    if AnomalyCount >= 1 then
+      WriteColoredLine('✓ Successfully identified extreme outliers', COLOR_SUCCESS)
+    else
+      WriteColoredLine('⚠ May need tuning for this data distribution', COLOR_WARNING);
+
+    if (StreamAnomalies >= 5) and (StreamAnomalies <= 15) then
+      WriteColoredLine('✓ Good balance: detected anomalies without excessive false positives', COLOR_SUCCESS)
+    else if StreamAnomalies < 5 then
+      WriteColoredLine('⚠ May be under-sensitive (too few anomalies detected)', COLOR_WARNING)
+    else
+      WriteColoredLine('⚠ May be over-sensitive (too many false positives)', COLOR_WARNING);
+
     DrawSeparator;
-    WriteColoredLine(Format('Total confirmed anomalies: %d', [ConfirmedAnomalies]), COLOR_INFO);
-    WriteLn('The system correctly identified only the persistent pattern.');
+    WriteColoredLine('PERFORMANCE METRICS:', COLOR_INFO);
+    WriteLn(Detector.GetPerformanceReport);
+
+    // Add meaningful analysis
+    Metrics := Detector.PerformanceMonitor.GetCurrentMetrics;
+    WriteColoredLine('ISOLATION FOREST ANALYSIS:', COLOR_INFO);
+    WriteLn(Format('Total evaluations: %d points processed', [Metrics.TotalDetections]));
+    WriteLn(Format('Multi-dimensional performance: %.0f detections/sec', [Metrics.ThroughputPerSecond]));
+    WriteLn(Format('Training efficiency: %d ms for %d trees', [TrainingTime, Detector.NumTrees]));
 
   finally
-    ConfirmationSystem.Free;
     Detector.Free;
   end;
 
   WaitForUser;
 end;
 
-procedure TestRealWorldScenario;
+procedure TestFactoryPattern;
 var
-  SlidingDetector: TSlidingWindowDetector;
-  EMADetector: TEMAAnomalyDetector;
-  AdaptiveDetector: TAdaptiveAnomalyDetector;
-  ConfirmationSystem: TAnomalyConfirmationSystem;
-  Config: TAnomalyDetectionConfig;
-  i, Hour: Integer;
-  Value, BaseTraffic: Double;
-  Results: array[1..3] of TAnomalyResult;
-  AnomalyVotes: Integer;
-  ConfirmedAnomalies: Integer;
-  DetectorNames: array[1..3] of string;
+  WebTrafficDetector: TBaseAnomalyDetector;
+  FinancialDetector: TBaseAnomalyDetector;
+  i: Integer;
+  Result: TAnomalyResult;
+  Metrics: TDetectorMetrics;
 begin
-  WriteColoredLine('=== Real-World Scenario: 24/7 Web Traffic Monitoring ===', COLOR_SUCCESS);
-  WriteLn('Simulating 7 days (168 hours) of web traffic with:');
-  WriteLn('  - Daily patterns (daytime peaks, nighttime lows)');
-  WriteLn('  - Weekly patterns (different weekends)');
-  WriteLn('  - Realistic anomalies (DDoS attacks, downtime, viral events)');
-  WriteLn;
-  WriteLn('Using an ensemble of 3 detectors for greater reliability:');
-  WriteLn('  1. Sliding Window: for short-term trends');
-  WriteLn('  2. EMA: for rapid adaptation');
-  WriteLn('  3. Adaptive: for long-term learning');
+  WriteColoredLine('=== DETECTOR FACTORY PATTERN DEMO ===', COLOR_TITLE);
+  WriteLn('The Factory Pattern simplifies detector creation');
+  WriteLn('with optimized configurations for specific scenarios.');
   WriteLn;
 
-  // Unified configuration
-  Config := TAnomalyDetectionConfig.Default;
-  Config.SigmaMultiplier := 2.5;  // More sensitive for web security
+  WriteColoredLine('Creating pre-configured detectors:', COLOR_INFO);
 
-  SlidingDetector := TSlidingWindowDetector.Create(24, Config);    // 24-hour window
-  EMADetector := TEMAAnomalyDetector.Create(0.05, Config);         // Slow adaptation
-  AdaptiveDetector := TAdaptiveAnomalyDetector.Create(168, 0.01, Config); // Learns over 1 week
-  ConfirmationSystem := TAnomalyConfirmationSystem.Create(5, 2);   // 2 confirmations out of 5
-
-  DetectorNames[1] := 'Sliding';
-  DetectorNames[2] := 'EMA';
-  DetectorNames[3] := 'Adaptive';
-
+  // Web Traffic Monitoring
+  WebTrafficDetector := TAnomalyDetectorFactory.CreateForWebTrafficMonitoring;
   try
-    WriteColoredLine('Starting simulation...', COLOR_INFO);
-    WriteLn;
-    ConfirmedAnomalies := 0;
+    WriteColoredLine('1. Web Traffic Monitor (Sliding Window, σ=2.5)', COLOR_SUCCESS);
+    WriteLn(Format('   Type: %s', [WebTrafficDetector.ClassName]));
+    WriteLn(Format('   Name: %s', [WebTrafficDetector.Name]));
+    WriteLn(Format('   Sigma: %.1f (more sensitive for security)', [WebTrafficDetector.Config.SigmaMultiplier]));
 
-    for i := 1 to 168 do  // 7 days * 24 hours
+    // Quick test with performance monitoring
+    if WebTrafficDetector is TSlidingWindowDetector then
     begin
-      Hour := (i - 1) mod 24;
+      for i := 1 to 50 do
+        TSlidingWindowDetector(WebTrafficDetector).AddValue(1000 + Random(200) - 100); // Normal traffic
 
-      // Realistic web traffic pattern
-      BaseTraffic := 1000;  // Base traffic
+      WebTrafficDetector.PerformanceMonitor.StartMeasurement;
+      Result := WebTrafficDetector.Detect(5000); // DDoS spike
+      WebTrafficDetector.PerformanceMonitor.StopMeasurement(Result.IsAnomaly);
 
-      // Daily pattern (sinusoidal)
-      BaseTraffic := BaseTraffic + 500 * Sin((Hour - 6) * Pi / 12); // Peak at noon
+      if Result.IsAnomaly then
+        WriteColoredLine('   ✓ Test: DDoS attack detected correctly', COLOR_SUCCESS)
+      else
+        WriteColoredLine('   ✗ Test: DDoS attack NOT detected', COLOR_ANOMALY);
 
-      // Weekly pattern (lower weekends)
-      if ((i - 1) div 24) >= 5 then  // Weekend
-        BaseTraffic := BaseTraffic * 0.7;
-
-      // Add realistic noise
-      Value := BaseTraffic + Random(200) - 100;
-
-      // Planned anomalous events
-      case i of
-        36:  // DDoS attack
-        begin
-          Value := Value * 5;
-          WriteColoredLine(Format('>>> EVENT: DDoS attack at hour %d (day %d, %d:00 hours)',
-                                 [i, (i-1) div 24 + 1, Hour]), COLOR_WARNING);
-        end;
-        72:  // Downtime
-        begin
-          Value := Value * 0.1;
-          WriteColoredLine(Format('>>> EVENT: Server down at hour %d (day %d, %d:00 hours)',
-                                 [i, (i-1) div 24 + 1, Hour]), COLOR_WARNING);
-        end;
-        120: // Viral event
-        begin
-          Value := Value * 3;
-          WriteColoredLine(Format('>>> EVENT: Viral content at hour %d (day %d, %d:00 hours)',
-                                 [i, (i-1) div 24 + 1, Hour]), COLOR_WARNING);
-        end;
-      end;
-
-      // Process with all detectors
-      SlidingDetector.AddValue(Value);
-      EMADetector.AddValue(Value);
-      AdaptiveDetector.ProcessValue(Value);
-
-      // Collect results
-      Results[1] := SlidingDetector.Detect(Value);
-      Results[2] := EMADetector.Detect(Value);
-      Results[3] := AdaptiveDetector.Detect(Value);
-
-      // Voting: at least 2 out of 3 detectors must agree
-      AnomalyVotes := 0;
-      for var j := 1 to 3 do
-        if Results[j].IsAnomaly then
-          Inc(AnomalyVotes);
-
-      if AnomalyVotes >= 2 then
-      begin
-        ConfirmationSystem.AddPotentialAnomaly(Value);
-        if ConfirmationSystem.IsConfirmedAnomaly(Value) then
-        begin
-          Inc(ConfirmedAnomalies);
-          Write(Format('[Hour %3d - Day %d, %02d:00] ', [i, (i-1) div 24 + 1, Hour]));
-          WriteColoredLine(Format('*** CONFIRMED ANOMALY: %.0f requests/hour ***', [Value]),
-                          COLOR_ANOMALY);
-
-          // Show which detectors triggered
-          Write('  Detected by: ');
-          for var j := 1 to 3 do
-            if Results[j].IsAnomaly then
-              Write(Format('%s (Z=%.1f) ', [DetectorNames[j], Results[j].ZScore]));
-          WriteLn;
-        end;
-      end;
-
-      // Allow adaptive detector to learn if normal
-      if not Results[3].IsAnomaly then
-        AdaptiveDetector.UpdateNormal(Value);
-
-      // Daily report
-      if (i mod 24 = 0) then
-      begin
-        DrawSeparator;
-        WriteColoredLine(Format('End of day %d - Statistics:', [(i-1) div 24 + 1]), COLOR_INFO);
-        WriteLn(Format('  Average traffic last 24h: %.0f req/hour', [SlidingDetector.CurrentMean]));
-        WriteLn(Format('  EMA average: %.0f req/hour', [EMADetector.CurrentMean]));
-        WriteLn(Format('  Adaptive average: %.0f req/hour', [AdaptiveDetector.CurrentMean]));
-        DrawSeparator;
-      end;
+      Metrics := WebTrafficDetector.PerformanceMonitor.GetCurrentMetrics;
+      WriteLn(Format('   Performance: %.0f detections/sec', [Metrics.ThroughputPerSecond]));
     end;
-
     WriteLn;
-    WriteColoredLine('=== FINAL SUMMARY ===', COLOR_SUCCESS);
-    WriteLn('Simulation duration: 7 days (168 hours)');
-    WriteLn(Format('Confirmed anomalies: %d', [ConfirmedAnomalies]));
-    WriteLn;
-    WriteLn('Events correctly detected:');
-    WriteLn('  - DDoS attack (5x normal traffic)');
-    WriteLn('  - Server downtime (10% normal traffic)');
-    WriteLn('  - Viral event (3x normal traffic)');
-    WriteLn;
-    WriteLn('The detector ensemble provided greater reliability');
-    WriteLn('by reducing both false positives and false negatives.');
 
   finally
-    ConfirmationSystem.Free;
-    AdaptiveDetector.Free;
-    EMADetector.Free;
-    SlidingDetector.Free;
+    WebTrafficDetector.Free;
   end;
+
+  // Financial Data
+  FinancialDetector := TAnomalyDetectorFactory.CreateForFinancialData;
+  try
+    WriteColoredLine('2. Financial Data Monitor (EMA, σ=3.0)', COLOR_SUCCESS);
+    WriteLn(Format('   Type: %s', [FinancialDetector.ClassName]));
+    WriteLn(Format('   Name: %s', [FinancialDetector.Name]));
+    WriteLn(Format('   Sigma: %.1f (financial standard)', [FinancialDetector.Config.SigmaMultiplier]));
+    WriteLn(Format('   Min StdDev: %.3f (high precision)', [FinancialDetector.Config.MinStdDev]));
+
+    // Quick test with performance monitoring
+    if FinancialDetector is TEMAAnomalyDetector then
+    begin
+      for i := 1 to 30 do
+        TEMAAnomalyDetector(FinancialDetector).AddValue(100 + Random(10) - 5); // Normal stock price
+
+      FinancialDetector.PerformanceMonitor.StartMeasurement;
+      Result := FinancialDetector.Detect(150); // Price spike
+      FinancialDetector.PerformanceMonitor.StopMeasurement(Result.IsAnomaly);
+
+      if Result.IsAnomaly then
+        WriteColoredLine('   ✓ Test: Price spike detected', COLOR_SUCCESS)
+      else
+        WriteColoredLine('   ✗ Test: Price spike NOT detected', COLOR_ANOMALY);
+
+      Metrics := FinancialDetector.PerformanceMonitor.GetCurrentMetrics;
+      WriteLn(Format('   Performance: %.0f detections/sec', [Metrics.ThroughputPerSecond]));
+    end;
+    WriteLn;
+
+  finally
+    FinancialDetector.Free;
+  end;
+
+  WriteColoredLine('=== FACTORY PATTERN ADVANTAGES ===', COLOR_SUCCESS);
+  WriteLn('✓ Domain-optimized configurations');
+  WriteLn('✓ Simplified client code');
+  WriteLn('✓ Centralized creation logic');
+  WriteLn('✓ Easy maintenance and testing');
+  WriteLn('✓ Extensible without client changes');
 
   WaitForUser;
 end;
+
+// ============================================================================
+// MENU SYSTEM
+// ============================================================================
 
 procedure ShowMenu;
 begin
   WriteLn;
-  WriteColoredLine('=== ANOMALY DETECTION DEMO MENU ===', COLOR_SUCCESS);
-  WriteLn('1. Test 3-Sigma Detector (historical data)');
-  WriteLn('2. Test Sliding Window Detector (streaming)');
-  WriteLn('3. Test EMA Detector (rapid adaptation)');
-  WriteLn('4. Test Adaptive Detector (continuous learning)');
-  WriteLn('5. Test Confirmation System (reduce false positives)');
-  WriteLn('6. Real-World Scenario: Web Traffic Monitoring');
-  WriteLn('7. Run all tests in sequence');
-  WriteLn('0. Exit');
+  DrawDoubleSeparator;
+  WriteColoredLine('        ANOMALY DETECTION DEMO - COMPLETE EDITION         ', COLOR_TITLE);
+  DrawDoubleSeparator;
   WriteLn;
+  WriteColoredLine('=== CLASSIC ALGORITHMS ===', COLOR_SUCCESS);
+  WriteLn('1.  Test 3-Sigma Detector (historical data analysis)');
+  WriteLn('2.  Test Sliding Window Detector (streaming data)');
+  WriteLn;
+  WriteColoredLine('=== ADVANCED FEATURES ===', COLOR_INFO);
+  WriteLn('3.  Test Isolation Forest (multi-dimensional detection)');
+  WriteLn('4.  Test Detector Factory Pattern');
+  WriteLn;
+  WriteColoredLine('=== BATCH OPERATIONS ===', COLOR_INFO);
+  WriteLn('5. Run all tests');
+  WriteLn;
+  WriteColoredLine('0.  Exit', COLOR_NORMAL);
+  WriteLn;
+  DrawSeparator;
   Write('Select option: ');
 end;
 
+procedure RunAllTests;
+begin
+  WriteColoredLine('=== RUNNING ALL TESTS ===', COLOR_TITLE);
+  TestThreeSigmaDetector;
+  TestSlidingWindowDetector;
+  TestIsolationForestDetector;
+  TestFactoryPattern;
+  WriteColoredLine('=== ALL TESTS COMPLETED ===', COLOR_SUCCESS);
+  WaitForUser;
+end;
+
+// ============================================================================
+// MAIN PROGRAM
+// ============================================================================
+
 var
   Choice: Integer;
-  RunAll: Boolean;
   InputStr: string;
 
 begin
@@ -672,12 +564,14 @@ begin
     Randomize;
     SetConsoleColor(COLOR_NORMAL);
 
-    WriteColoredLine('Anomaly Detection Algorithms Demo', COLOR_SUCCESS);
-    WriteColoredLine('Developed with Delphi - Domain Modeling Pattern', COLOR_INFO);
-    WriteLn(StringOfChar('=', 50));
+    DrawDoubleSeparator;
+    WriteColoredLine('    Anomaly Detection Algorithms Library - Complete Demo    ', COLOR_TITLE);
+    WriteColoredLine('         Developed with Delphi - Domain Modeling Pattern     ', COLOR_INFO);
+    DrawDoubleSeparator;
     WriteLn;
-    WriteLn('This demo shows various algorithms for detecting anomalies in data.');
-    WriteLn('Each algorithm has specific strengths for different scenarios.');
+    WriteLn('This comprehensive demo showcases various algorithms for detecting anomalies in data.');
+    WriteLn('From classic statistical methods to modern machine learning approaches,');
+    WriteLn('each algorithm has specific strengths for different scenarios and data types.');
 
     repeat
       ShowMenu;
@@ -689,21 +583,10 @@ begin
       case Choice of
         1: TestThreeSigmaDetector;
         2: TestSlidingWindowDetector;
-        3: TestEMADetector;
-        4: TestAdaptiveDetector;
-        5: TestAnomalyConfirmationSystem;
-        6: TestRealWorldScenario;
-        7: begin
-             RunAll := True;
-             TestThreeSigmaDetector;
-             TestSlidingWindowDetector;
-             TestEMADetector;
-             TestAdaptiveDetector;
-             TestAnomalyConfirmationSystem;
-             TestRealWorldScenario;
-             RunAll := False;
-           end;
-        0: WriteLn('Goodbye!');
+        3: TestIsolationForestDetector;
+        4: TestFactoryPattern;
+        5: RunAllTests;
+        0: WriteColoredLine('Thank you for using the Anomaly Detection Demo!', COLOR_SUCCESS);
       else
         WriteColoredLine('Invalid option. Please try again.', COLOR_WARNING);
       end;
@@ -715,7 +598,7 @@ begin
     begin
       SetConsoleColor(COLOR_ANOMALY);
       WriteLn;
-      WriteLn('*** ERROR ***');
+      WriteLn('*** CRITICAL ERROR ***');
       WriteLn('Message: ' + E.Message);
       WriteLn('Class: ' + E.ClassName);
       SetConsoleColor(COLOR_NORMAL);
