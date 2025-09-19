@@ -6,7 +6,7 @@
 // is strictly prohibited without the prior written consent of the copyright
 // holder. This software is proprietary and confidential.
 //
-// Unit tests for the Anomaly Detection Algorithms Library
+// Unit tests for the Anomaly Detection Algorithms Library - Refactored Version
 //
 // ***************************************************************************
 
@@ -19,6 +19,7 @@ uses
   AnomalyDetectionAlgorithms,
   System.SysUtils,
   System.Math,
+  System.Classes,
   System.DateUtils;
 
 type
@@ -55,6 +56,8 @@ type
     procedure TestZeroVarianceData;
     [Test]
     procedure TestStatisticsCalculation;
+    [Test]
+    procedure TestInitializationState;
   end;
 
   [TestFixture]
@@ -69,6 +72,8 @@ type
 
     [Test]
     procedure TestEmptyWindow;
+    [Test]
+    procedure TestInitializeWindow;
     [Test]
     procedure TestWindowFilling;
     [Test]
@@ -96,6 +101,8 @@ type
     [Test]
     procedure TestInitialization;
     [Test]
+    procedure TestWarmUpMethod;
+    [Test]
     procedure TestAlphaParameter;
     [Test]
     procedure TestRapidAdaptation;
@@ -120,6 +127,8 @@ type
     [Test]
     procedure TestInitialState;
     [Test]
+    procedure TestInitializeWithNormalData;
+    [Test]
     procedure TestLearningFromNormalValues;
     [Test]
     procedure TestRejectingAnomalies;
@@ -129,6 +138,32 @@ type
     procedure TestAdaptationRate;
     [Test]
     procedure TestAnomalyThreshold;
+  end;
+
+  [TestFixture]
+  TIsolationForestDetectorTests = class
+  private
+    FDetector: TIsolationForestDetector;
+  public
+    [Setup]
+    procedure Setup;
+    [TearDown]
+    procedure TearDown;
+
+    [Test]
+    procedure TestTrainFromDataset;
+    [Test]
+    procedure TestIncrementalTraining;
+    [Test]
+    procedure TestAutoTraining;
+    [Test]
+    procedure TestMultiDimensionalDetection;
+    [Test]
+    procedure TestFraudDetectionScenario;
+    [Test]
+    procedure TestSensorDataScenario;
+    [Test]
+    procedure TestCSVTraining;
   end;
 
   [TestFixture]
@@ -164,6 +199,8 @@ type
     procedure TestRealWorldScenario;
     [Test]
     procedure TestPerformanceUnderLoad;
+    [Test]
+    procedure TestFactoryPatternRefactored;
   end;
 
 implementation
@@ -214,13 +251,12 @@ var
   EmptyData: TArray<Double>;
 begin
   SetLength(EmptyData, 0);
-  FDetector.SetHistoricalData(EmptyData);
   Assert.WillRaise(
     procedure
     begin
-      FDetector.CalculateStatistics;
+      FDetector.LearnFromHistoricalData(EmptyData);
     end,
-    Exception
+    EAnomalyDetectionException
   );
 end;
 
@@ -230,14 +266,41 @@ var
 begin
   SetLength(SingleData, 1);
   SingleData[0] := 100;
-  FDetector.SetHistoricalData(SingleData);
   Assert.WillRaise(
     procedure
     begin
-      FDetector.CalculateStatistics;
+      FDetector.LearnFromHistoricalData(SingleData);
     end,
-    Exception
+    EAnomalyDetectionException
   );
+end;
+
+procedure TThreeSigmaDetectorTests.TestInitializationState;
+var
+  Data: TArray<Double>;
+begin
+  // Initially not initialized
+  Assert.IsFalse(FDetector.IsInitialized, 'Should not be initialized initially');
+
+  Assert.WillRaise(
+    procedure
+    begin
+      FDetector.Detect(100);
+    end,
+    EAnomalyDetectionException
+  );
+
+  // After learning, should be initialized
+  SetLength(Data, 10);
+  for var i := 0 to 9 do
+    Data[i] := 100 + i;
+
+  FDetector.LearnFromHistoricalData(Data);
+  Assert.IsTrue(FDetector.IsInitialized, 'Should be initialized after learning');
+
+  // Should work now
+  var Result := FDetector.Detect(100);
+  Assert.IsNotNull(@Result);
 end;
 
 procedure TThreeSigmaDetectorTests.TestNormalData;
@@ -251,8 +314,7 @@ begin
   for i := 0 to 99 do
     Data[i] := 100 + (i mod 20) - 10; // Generates values 90-109
 
-  FDetector.SetHistoricalData(Data);
-  FDetector.CalculateStatistics;
+  FDetector.LearnFromHistoricalData(Data);
 
   // Test values within normal range
   Result := FDetector.Detect(100);
@@ -276,8 +338,7 @@ begin
   for i := 0 to 49 do
     Data[i] := 100 + Random(10) - 5; // Values ~95-105
 
-  FDetector.SetHistoricalData(Data);
-  FDetector.CalculateStatistics;
+  FDetector.LearnFromHistoricalData(Data);
 
   // Test clear anomalies
   Result := FDetector.Detect(200);
@@ -307,8 +368,7 @@ begin
   for i := 0 to 99 do
     Data[i] := 100 + Random(20) - 10;
 
-  FDetector.SetHistoricalData(Data);
-  FDetector.CalculateStatistics;
+  FDetector.LearnFromHistoricalData(Data);
 
   // Value at 2.5 sigma should now be anomaly
   var TestValue := FDetector.Mean + 2.5 * FDetector.StdDev;
@@ -327,8 +387,7 @@ begin
   for i := 0 to 49 do
     Data[i] := 100;
 
-  FDetector.SetHistoricalData(Data);
-  FDetector.CalculateStatistics;
+  FDetector.LearnFromHistoricalData(Data);
 
   // Should use MinStdDev
   Assert.AreEqual(FDetector.Config.MinStdDev, FDetector.StdDev);
@@ -347,8 +406,7 @@ begin
   Data[0] := 2; Data[1] := 4; Data[2] := 6; Data[3] := 8; Data[4] := 10;
   // Mean should be 6, StdDev should be sqrt(10) ≈ 3.162
 
-  FDetector.SetHistoricalData(Data);
-  FDetector.CalculateStatistics;
+  FDetector.LearnFromHistoricalData(Data);
 
   Assert.IsTrue(AreFloatsEqual(6.0, FDetector.Mean), 'Mean calculation error');
   Assert.IsTrue(AreFloatsEqual(Sqrt(10), FDetector.StdDev, 0.001), 'StdDev calculation error');
@@ -377,6 +435,25 @@ begin
   // Now test detection
   Result := FDetector.Detect(100);
   Assert.IsFalse(Result.IsAnomaly, 'Value equal to only data point should not be anomaly');
+end;
+
+procedure TSlidingWindowDetectorTests.TestInitializeWindow;
+var
+  InitialData: TArray<Double>;
+  i: Integer;
+begin
+  // Test window initialization
+  SetLength(InitialData, 5);
+  for i := 0 to 4 do
+    InitialData[i] := 100 + i;
+
+  FDetector.InitializeWindow(InitialData);
+
+  Assert.IsTrue(AreFloatsEqual(102.0, FDetector.CurrentMean), 'Initialized mean should be 102');
+
+  // Add more values and ensure it works normally
+  FDetector.AddValue(105);
+  Assert.IsTrue(FDetector.CurrentMean > 102, 'Mean should increase after adding 105');
 end;
 
 procedure TSlidingWindowDetectorTests.TestWindowFilling;
@@ -448,10 +525,7 @@ procedure TSlidingWindowDetectorTests.TestAnomalyDetectionInStream;
 var
   i: Integer;
   Result: TAnomalyResult;
-  AnomalyCount: Integer;
 begin
-  AnomalyCount := 0;
-
   // Stream normal data
   for i := 1 to 50 do
   begin
@@ -541,6 +615,29 @@ begin
   // After first value
   FDetector.AddValue(100);
   Assert.AreEqual<Double>(100.0, FDetector.CurrentMean);
+  Assert.IsTrue(FDetector.IsInitialized, 'Should be initialized after first value');
+end;
+
+procedure TEMAAnomalyDetectorTests.TestWarmUpMethod;
+var
+  BaselineData: TArray<Double>;
+  i: Integer;
+begin
+  // Create baseline data
+  SetLength(BaselineData, 20);
+  for i := 0 to 19 do
+    BaselineData[i] := 100 + Random(10) - 5;
+
+  // Warm up with baseline
+  FDetector.WarmUp(BaselineData);
+
+  Assert.IsTrue(FDetector.IsInitialized, 'Should be initialized after warm-up');
+  Assert.IsTrue(Abs(FDetector.CurrentMean - 100) < 10, 'Mean should be close to baseline');
+  Assert.IsTrue(FDetector.CurrentStdDev > 0, 'StdDev should be positive');
+
+  // Should work immediately for detection
+  var Result := FDetector.Detect(150);
+  Assert.IsNotNull(@Result, 'Detection should work after warm-up');
 end;
 
 procedure TEMAAnomalyDetectorTests.TestAlphaParameter;
@@ -659,11 +756,35 @@ procedure TAdaptiveAnomalyDetectorTests.TestInitialState;
 var
   Result: TAnomalyResult;
 begin
+  Assert.IsFalse(FDetector.IsInitialized, 'Should not be initialized initially');
+
   Result := FDetector.Detect(100);
   Assert.IsFalse(Result.IsAnomaly, 'Uninitialized detector should not detect anomalies');
 
   FDetector.ProcessValue(100);
+  Assert.IsTrue(FDetector.IsInitialized, 'Should be initialized after processing first value');
   Assert.AreEqual<Double>(100.0, FDetector.CurrentMean);
+end;
+
+procedure TAdaptiveAnomalyDetectorTests.TestInitializeWithNormalData;
+var
+  NormalData: TArray<Double>;
+  i: Integer;
+begin
+  // Create normal baseline data
+  SetLength(NormalData, 50);
+  for i := 0 to 49 do
+    NormalData[i] := 100 + Random(20) - 10; // Values 90-110
+
+  FDetector.InitializeWithNormalData(NormalData);
+
+  Assert.IsTrue(FDetector.IsInitialized, 'Should be initialized with normal data');
+  Assert.IsTrue(Abs(FDetector.CurrentMean - 100) < 15, 'Mean should be close to expected value');
+  Assert.IsTrue(FDetector.CurrentStdDev > 0, 'StdDev should be positive');
+
+  // Should work immediately for detection
+  var Result := FDetector.Detect(150);
+  Assert.IsNotNull(@Result, 'Detection should work after initialization');
 end;
 
 procedure TAdaptiveAnomalyDetectorTests.TestLearningFromNormalValues;
@@ -726,6 +847,7 @@ var
   Value: Double;
   AcceptedCount: Integer;
   Config: TAnomalyDetectionConfig;
+  NormalData: TArray<Double>;
 begin
   // Use very permissive config for trend adaptation
   Config := TAnomalyDetectionConfig.Default;
@@ -738,12 +860,11 @@ begin
   AcceptedCount := 0;
 
   // Initialize with variable baseline to establish reasonable variance
-  for i := 1 to 20 do
-  begin
-    Value := 100 + Random(20) - 10; // Values 90-110
-    FDetector.ProcessValue(Value);
-    FDetector.UpdateNormal(Value);
-  end;
+  SetLength(NormalData, 20);
+  for i := 0 to 19 do
+    NormalData[i] := 100 + Random(20) - 10; // Values 90-110
+
+  FDetector.InitializeWithNormalData(NormalData);
 
   // Now test gradual trend
   for i := 1 to 50 do
@@ -769,14 +890,17 @@ procedure TAdaptiveAnomalyDetectorTests.TestAdaptationRate;
 var
   FastDetector: TAdaptiveAnomalyDetector;
   i: Integer;
+  NormalData: TArray<Double>;
 begin
   FastDetector := TAdaptiveAnomalyDetector.Create(100, 0.5); // Fast adaptation
   try
-    // Initialize both
-    FDetector.ProcessValue(100);
-    FDetector.UpdateNormal(100);
-    FastDetector.ProcessValue(100);
-    FastDetector.UpdateNormal(100);
+    // Initialize both detectors
+    SetLength(NormalData, 10);
+    for i := 0 to 9 do
+      NormalData[i] := 100;
+
+    FDetector.InitializeWithNormalData(NormalData);
+    FastDetector.InitializeWithNormalData(NormalData);
 
     // Feed new normal level
     for i := 1 to 10 do
@@ -799,6 +923,7 @@ var
   SensitiveDetector: TAdaptiveAnomalyDetector;
   i: Integer;
   Result: TAnomalyResult;
+  NormalData: TArray<Double>;
 begin
   Config := TAnomalyDetectionConfig.Default;
   Config.SigmaMultiplier := 1.5; // More sensitive
@@ -806,17 +931,289 @@ begin
   SensitiveDetector := TAdaptiveAnomalyDetector.Create(100, 0.1, Config);
   try
     // Initialize
-    for i := 1 to 10 do
-    begin
-      SensitiveDetector.ProcessValue(100);
-      SensitiveDetector.UpdateNormal(100);
-    end;
+    SetLength(NormalData, 10);
+    for i := 0 to 9 do
+      NormalData[i] := 100;
+
+    SensitiveDetector.InitializeWithNormalData(NormalData);
 
     // Test borderline value
     Result := SensitiveDetector.Detect(100 + 2 * SensitiveDetector.CurrentStdDev);
     Assert.IsTrue(Result.IsAnomaly, 'Should be more sensitive with lower sigma multiplier');
   finally
     SensitiveDetector.Free;
+  end;
+end;
+
+{ TIsolationForestDetectorTests }
+
+procedure TIsolationForestDetectorTests.Setup;
+var
+  Config: TAnomalyDetectionConfig;
+begin
+  // Use more sensitive configuration for testing
+  Config := TAnomalyDetectionConfig.Default;
+  Config.SigmaMultiplier := 2.0; // More sensitive
+  FDetector := TIsolationForestDetector.Create(100, 150, 10, Config); // More trees, larger sample, deeper trees
+end;
+
+procedure TIsolationForestDetectorTests.TearDown;
+begin
+  FDetector.Free;
+end;
+
+procedure TIsolationForestDetectorTests.TestTrainFromDataset;
+var
+  Dataset: TArray<TArray<Double>>;
+  i: Integer;
+  Instance: TArray<Double>;
+  Result: TAnomalyResult;
+begin
+  // Create larger training dataset for better coverage
+  SetLength(Dataset, 500);
+  for i := 0 to 499 do
+  begin
+    SetLength(Dataset[i], 2);
+    Dataset[i][0] := 100 + Random(20) - 10; // X: 90-110
+    Dataset[i][1] := 50 + Random(12) - 6;   // Y: 44-56
+  end;
+
+  // Train with single method call
+  FDetector.TrainFromDataset(Dataset);
+
+  Assert.IsTrue(FDetector.IsInitialized, 'Should be initialized after training');
+  Assert.AreEqual<Integer>(2, FDetector.FeatureCount, 'Should detect 2 features');
+
+  // Test detection with clear normal point
+  SetLength(Instance, 2);
+  Instance[0] := 100; Instance[1] := 50; // Center of training data
+  Result := FDetector.DetectMultiDimensional(Instance);
+  Assert.IsFalse(Result.IsAnomaly, 'Normal point should not be anomaly');
+
+  // Test detection with clear anomaly - much further from training data
+  Instance[0] := 500; Instance[1] := 500; // Very far from training data
+  Result := FDetector.DetectMultiDimensional(Instance);
+  Assert.IsTrue(Result.IsAnomaly, 'Far point should be anomaly');
+end;
+
+procedure TIsolationForestDetectorTests.TestIncrementalTraining;
+var
+  i: Integer;
+  Instance: TArray<Double>;
+  Result: TAnomalyResult;
+begin
+  Assert.IsFalse(FDetector.IsInitialized, 'Should not be initialized initially');
+
+  // Add training data incrementally
+  for i := 1 to 150 do
+  begin
+    SetLength(Instance, 2);
+    Instance[0] := 100 + Random(20) - 10;
+    Instance[1] := 50 + Random(15) - 7;
+    FDetector.AddTrainingData(Instance);
+  end;
+
+  Assert.IsFalse(FDetector.IsInitialized, 'Should not be auto-trained yet');
+
+  // Manually finalize training
+  FDetector.FinalizeTraining;
+
+  Assert.IsTrue(FDetector.IsInitialized, 'Should be trained after finalization');
+
+  // Test detection
+  SetLength(Instance, 2);
+  Instance[0] := 100; Instance[1] := 50;
+  Result := FDetector.DetectMultiDimensional(Instance);
+  Assert.IsNotNull(@Result, 'Should be able to detect after training');
+end;
+
+procedure TIsolationForestDetectorTests.TestAutoTraining;
+var
+  i: Integer;
+  Instance: TArray<Double>;
+begin
+  // Set low auto-train threshold for testing
+  FDetector.AutoTrainThreshold := 50;
+
+  Assert.IsFalse(FDetector.IsInitialized, 'Should not be initialized initially');
+
+  // Add enough data to trigger auto-training
+  for i := 1 to 60 do
+  begin
+    SetLength(Instance, 2);
+    Instance[0] := 100 + Random(20) - 10;
+    Instance[1] := 50 + Random(15) - 7;
+    FDetector.AddTrainingData(Instance);
+
+    if i = 50 then
+      Assert.IsTrue(FDetector.IsInitialized, 'Should auto-train at threshold');
+  end;
+
+  Assert.IsTrue(FDetector.IsInitialized, 'Should remain trained');
+end;
+
+procedure TIsolationForestDetectorTests.TestMultiDimensionalDetection;
+var
+  Dataset: TArray<TArray<Double>>;
+  Instance: TArray<Double>;
+  i: Integer;
+  Result: TAnomalyResult;
+  AnomalyCount: Integer;
+begin
+  // Create multi-dimensional training data (3D)
+  SetLength(Dataset, 300);
+  for i := 0 to 299 do
+  begin
+    SetLength(Dataset[i], 3);
+    Dataset[i][0] := 100 + Random(20) - 10; // X: 90-110
+    Dataset[i][1] := 50 + Random(16) - 8;   // Y: 42-58
+    Dataset[i][2] := 25 + Random(10) - 5;   // Z: 20-30
+  end;
+
+  FDetector.TrainFromDataset(Dataset);
+
+  Assert.AreEqual<Integer>(3, FDetector.FeatureCount, 'Should detect 3 features');
+
+  // Test various points
+  AnomalyCount := 0;
+
+  // Normal points
+  SetLength(Instance, 3);
+  Instance := [100, 50, 25]; // Center
+  Result := FDetector.DetectMultiDimensional(Instance);
+  if not Result.IsAnomaly then Inc(AnomalyCount);
+
+  Instance := [105, 52, 22]; // Within normal range
+  Result := FDetector.DetectMultiDimensional(Instance);
+  if not Result.IsAnomaly then Inc(AnomalyCount);
+
+  // Anomaly points
+  Instance := [200, 200, 200]; // Far from training data
+  Result := FDetector.DetectMultiDimensional(Instance);
+  Assert.IsTrue(Result.IsAnomaly, 'Far point should be detected as anomaly');
+
+  Instance := [0, 0, 0]; // Far negative
+  Result := FDetector.DetectMultiDimensional(Instance);
+  Assert.IsTrue(Result.IsAnomaly, 'Far negative point should be anomaly');
+
+  Assert.IsTrue(AnomalyCount >= 1, 'Should identify some normal points correctly');
+end;
+
+procedure TIsolationForestDetectorTests.TestFraudDetectionScenario;
+var
+  TransactionData: TArray<TArray<Double>>;
+  SuspiciousTransaction: TArray<Double>;
+  i: Integer;
+  Result: TAnomalyResult;
+begin
+  // Create normal transaction patterns
+  SetLength(TransactionData, 500);
+  for i := 0 to 499 do
+  begin
+    SetLength(TransactionData[i], 4); // Amount, Hour, DayOfWeek, MerchantCategory
+    TransactionData[i][0] := 50 + Random(150);   // Amount: 50-200
+    TransactionData[i][1] := 8 + Random(12);     // Hour: 8-20
+    TransactionData[i][2] := 1 + Random(5);      // Weekday: 1-5
+    TransactionData[i][3] := 1 + Random(8);      // Category: 1-8
+  end;
+
+  FDetector.TrainForFraudDetection(TransactionData);
+
+  Assert.IsTrue(FDetector.IsInitialized, 'Should be trained for fraud detection');
+
+  // Test suspicious transaction
+  SetLength(SuspiciousTransaction, 4);
+  SuspiciousTransaction := [5000, 3, 7, 9]; // Large amount, 3AM, weekend, unusual category
+  Result := FDetector.DetectMultiDimensional(SuspiciousTransaction);
+  Assert.IsTrue(Result.IsAnomaly, 'Suspicious transaction should be flagged');
+
+  // Test normal transaction
+  SuspiciousTransaction := [125, 14, 3, 4]; // Normal amount, afternoon, midweek, common category
+  Result := FDetector.DetectMultiDimensional(SuspiciousTransaction);
+  Assert.IsFalse(Result.IsAnomaly, 'Normal transaction should not be flagged');
+end;
+
+procedure TIsolationForestDetectorTests.TestSensorDataScenario;
+var
+  SensorData: TArray<TArray<Double>>;
+  FailureReading: TArray<Double>;
+  i: Integer;
+  Result: TAnomalyResult;
+begin
+  // Create normal sensor readings
+  SetLength(SensorData, 400);
+  for i := 0 to 399 do
+  begin
+    SetLength(SensorData[i], 3); // Temperature, Pressure, Vibration
+    SensorData[i][0] := 20 + Random(10);   // Temp: 20-30°C
+    SensorData[i][1] := 100 + Random(20);  // Pressure: 100-120 kPa
+    SensorData[i][2] := 0.1 + Random * 0.4; // Vibration: 0.1-0.5
+  end;
+
+  FDetector.TrainForMultiSensorData(SensorData);
+
+  Assert.IsTrue(FDetector.IsInitialized, 'Should be trained for sensor monitoring');
+
+  // Test equipment failure pattern
+  SetLength(FailureReading, 3);
+  FailureReading := [45, 150, 2.0]; // High temp, high pressure, high vibration
+  Result := FDetector.DetectMultiDimensional(FailureReading);
+  Assert.IsTrue(Result.IsAnomaly, 'Equipment failure pattern should be detected');
+
+  // Test normal reading
+  FailureReading := [25, 110, 0.3]; // Normal values
+  Result := FDetector.DetectMultiDimensional(FailureReading);
+  Assert.IsFalse(Result.IsAnomaly, 'Normal sensor reading should not be anomaly');
+end;
+
+procedure TIsolationForestDetectorTests.TestCSVTraining;
+var
+  CSVFileName: string;
+  CSVContent: TStringList;
+  i: Integer;
+  Instance: TArray<Double>;
+  Result: TAnomalyResult;
+  FormatSettings: TFormatSettings;
+begin
+  // Usa format settings per garantire punto come separatore decimale
+  FormatSettings := TFormatSettings.Create('en-US');
+
+  // Create temporary CSV file
+  CSVFileName := 'test_data.csv';
+  CSVContent := TStringList.Create;
+  try
+    CSVContent.Add('X,Y,Z'); // Header
+
+    // Add normal data rows - usa FormatSettings specifici
+    for i := 1 to 100 do
+      CSVContent.Add(Format('%d,%d,%d', [
+        100 + Random(20) - 10,
+        50 + Random(16) - 8,
+        25 + Random(10) - 5
+      ], FormatSettings)); // Passa FormatSettings
+
+    CSVContent.SaveToFile(CSVFileName);
+
+    // Train from CSV - Metodo da implementare
+    FDetector.TrainFromCSV(CSVFileName, True); // Skip header
+
+    Assert.IsTrue(FDetector.IsTrained, 'Should be trained from CSV');
+    Assert.AreEqual<Integer>(3, FDetector.FeatureCount, 'Should detect 3 features from CSV');
+
+    // Test detection
+    SetLength(Instance, 3);
+    Instance := [100, 50, 25]; // Normal point
+    Result := FDetector.DetectMultiDimensional(Instance);
+    Assert.IsFalse(Result.IsAnomaly, 'Normal point should not be anomaly');
+
+    Instance := [300, 300, 300]; // Anomaly
+    Result := FDetector.DetectMultiDimensional(Instance);
+    Assert.IsTrue(Result.IsAnomaly, 'Anomaly should be detected');
+
+  finally
+    CSVContent.Free;
+    if FileExists(CSVFileName) then
+      DeleteFile(CSVFileName);
   end;
 end;
 
@@ -852,8 +1249,6 @@ begin
 end;
 
 procedure TAnomalyConfirmationSystemTests.TestToleranceParameter;
-var
-  i: Integer;
 begin
   // Add anomalies with 10% tolerance
   FSystem.AddPotentialAnomaly(100);
@@ -937,6 +1332,7 @@ var
   Value: Double;
   VoteCount: Integer;
   ConfirmedAnomalies: Integer;
+  BaselineData: TArray<Double>;
 begin
   SlidingDetector := TSlidingWindowDetector.Create(20);
   EMADetector := TEMAAnomalyDetector.Create(0.1);
@@ -944,6 +1340,15 @@ begin
   ConfirmationSystem := TAnomalyConfirmationSystem.Create(5, 2);
   try
     ConfirmedAnomalies := 0;
+
+    // Initialize detectors with baseline data
+    SetLength(BaselineData, 30);
+    for i := 0 to 29 do
+      BaselineData[i] := 100 + Random(20) - 10;
+
+    SlidingDetector.InitializeWindow(BaselineData);
+    EMADetector.WarmUp(BaselineData);
+    AdaptiveDetector.InitializeWithNormalData(BaselineData);
 
     // Normal data stream
     for i := 1 to 50 do
@@ -1068,12 +1473,95 @@ begin
   end;
 end;
 
+procedure TIntegrationTests.TestFactoryPatternRefactored;
+var
+  WebTrafficDetector: TBaseAnomalyDetector;
+  FinancialDetector: TBaseAnomalyDetector;
+  IoTDetector: TBaseAnomalyDetector;
+  IsolationDetector: TBaseAnomalyDetector;
+  Dataset: TArray<TArray<Double>>;
+  i: Integer;
+  Result: TAnomalyResult;
+begin
+  // Test all factory-created detectors
+  WebTrafficDetector := TAnomalyDetectorFactory.CreateForWebTrafficMonitoring;
+  FinancialDetector := TAnomalyDetectorFactory.CreateForFinancialData;
+  IoTDetector := TAnomalyDetectorFactory.CreateForIoTSensors;
+  IsolationDetector := TAnomalyDetectorFactory.CreateForHighDimensionalData;
+
+  try
+    // Test Web Traffic detector (should be SlidingWindow)
+    Assert.IsTrue(WebTrafficDetector is TSlidingWindowDetector, 'Web traffic should use sliding window');
+    for i := 1 to 50 do
+      TSlidingWindowDetector(WebTrafficDetector).AddValue(1000 + Random(200) - 100);
+
+    Result := WebTrafficDetector.Detect(5000); // DDoS spike
+    Assert.IsTrue(Result.IsAnomaly, 'Web traffic detector should detect DDoS');
+
+    // Test Financial detector (should be EMA)
+    Assert.IsTrue(FinancialDetector is TEMAAnomalyDetector, 'Financial should use EMA');
+    for i := 1 to 30 do
+      TEMAAnomalyDetector(FinancialDetector).AddValue(100 + Random(10) - 5);
+
+    Result := FinancialDetector.Detect(150); // Price spike
+    Assert.IsTrue(Result.IsAnomaly, 'Financial detector should detect price spike');
+
+    // Test IoT detector (should be Adaptive)
+    Assert.IsTrue(IoTDetector is TAdaptiveAnomalyDetector, 'IoT should use adaptive');
+
+    // Initialize with normal sensor readings
+    var BaselineData: TArray<Double>;
+    SetLength(BaselineData, 20);
+    for i := 0 to 19 do
+      BaselineData[i] := 25 + Random(10) - 5; // Temp readings
+
+    TAdaptiveAnomalyDetector(IoTDetector).InitializeWithNormalData(BaselineData);
+
+    Result := IoTDetector.Detect(60); // Overheating
+    Assert.IsTrue(Result.IsAnomaly, 'IoT detector should detect overheating');
+
+    // Test Isolation Forest (should handle multi-dimensional)
+    Assert.IsTrue(IsolationDetector is TIsolationForestDetector, 'HD should use Isolation Forest');
+
+    // Create multi-dimensional dataset
+    SetLength(Dataset, 200);
+    for i := 0 to 199 do
+    begin
+      SetLength(Dataset[i], 3);
+      Dataset[i][0] := 100 + Random(20) - 10;
+      Dataset[i][1] := 50 + Random(16) - 8;
+      Dataset[i][2] := 25 + Random(10) - 5;
+    end;
+
+    TIsolationForestDetector(IsolationDetector).TrainFromDataset(Dataset);
+
+    var Instance: TArray<Double>;
+    SetLength(Instance, 3);
+    Instance := [300, 300, 300]; // Clear anomaly
+    Result := TIsolationForestDetector(IsolationDetector).DetectMultiDimensional(Instance);
+    Assert.IsTrue(Result.IsAnomaly, 'Isolation Forest should detect multi-dim anomaly');
+
+    // Verify all detectors are properly initialized
+    Assert.IsTrue(WebTrafficDetector.IsInitialized, 'Web traffic detector should be ready');
+    Assert.IsTrue(FinancialDetector.IsInitialized, 'Financial detector should be ready');
+    Assert.IsTrue(IoTDetector.IsInitialized, 'IoT detector should be ready');
+    Assert.IsTrue(IsolationDetector.IsInitialized, 'Isolation detector should be ready');
+
+  finally
+    IsolationDetector.Free;
+    IoTDetector.Free;
+    FinancialDetector.Free;
+    WebTrafficDetector.Free;
+  end;
+end;
+
 initialization
   TDUnitX.RegisterTestFixture(TAnomalyDetectionConfigTests);
   TDUnitX.RegisterTestFixture(TThreeSigmaDetectorTests);
   TDUnitX.RegisterTestFixture(TSlidingWindowDetectorTests);
   TDUnitX.RegisterTestFixture(TEMAAnomalyDetectorTests);
   TDUnitX.RegisterTestFixture(TAdaptiveAnomalyDetectorTests);
+  TDUnitX.RegisterTestFixture(TIsolationForestDetectorTests);
   TDUnitX.RegisterTestFixture(TAnomalyConfirmationSystemTests);
   TDUnitX.RegisterTestFixture(TIntegrationTests);
 

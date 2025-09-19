@@ -44,13 +44,16 @@ unit AnomalyDetectionAlgorithms;
   - Performance metrics and monitoring
   - Factory pattern for easy detector creation
   - Multi-dimensional data support
+  - Dynamic threshold calculation for Isolation Forest
+  - CSV training support
+  - Auto-training capabilities
 }
 
 interface
 
 uses
   System.SysUtils, System.Classes, System.Math, System.Generics.Collections,
-  System.SyncObjs, System.DateUtils
+  System.SyncObjs, System.DateUtils, System.IOUtils, System.StrUtils
   {$IFDEF MSWINDOWS}, Winapi.Windows{$ENDIF};
 
 type
@@ -185,6 +188,7 @@ type
     procedure SaveToFile(const AFileName: string);
     procedure LoadFromFile(const AFileName: string);
     function GetPerformanceReport: string;
+    function IsInitialized: Boolean; virtual; abstract;
     property Name: string read FName;
     property Config: TAnomalyDetectionConfig read FConfig write FConfig;
     property OnAnomalyDetected: TAnomalyDetectedEvent read FOnAnomalyDetected write FOnAnomalyDetected;
@@ -209,10 +213,12 @@ type
     constructor Create; overload;
     constructor Create(const AConfig: TAnomalyDetectionConfig); overload;
     procedure SetHistoricalData(const AData: TArray<Double>);
+    procedure LearnFromHistoricalData(const AData: TArray<Double>);
     procedure CalculateStatistics;
     function Detect(const AValue: Double): TAnomalyResult; override;
     procedure SaveState(const AStream: TStream); override;
     procedure LoadState(const AStream: TStream); override;
+    function IsInitialized: Boolean; override;
     property Mean: Double read FMean;
     property StdDev: Double read FStdDev;
     property LowerLimit: Double read FLowerLimit;
@@ -243,9 +249,11 @@ type
     constructor Create(AWindowSize: Integer; const AConfig: TAnomalyDetectionConfig); overload;
     destructor Destroy; override;
     procedure AddValue(const AValue: Double);
+    procedure InitializeWindow(const AData: TArray<Double>);
     function Detect(const AValue: Double): TAnomalyResult; override;
     procedure SaveState(const AStream: TStream); override;
     procedure LoadState(const AStream: TStream); override;
+    function IsInitialized: Boolean; override;
     property CurrentMean: Double read FMean;
     property CurrentStdDev: Double read FStdDev;
     property WindowSize: Integer read FWindowSize;
@@ -272,9 +280,11 @@ type
     constructor Create(AAlpha: Double = 0.1); overload;
     constructor Create(AAlpha: Double; const AConfig: TAnomalyDetectionConfig); overload;
     procedure AddValue(const AValue: Double);
+    procedure WarmUp(const ABaselineData: TArray<Double>);
     function Detect(const AValue: Double): TAnomalyResult; override;
     procedure SaveState(const AStream: TStream); override;
     procedure LoadState(const AStream: TStream); override;
+    function IsInitialized: Boolean; override;
     property CurrentMean: Double read FCurrentMean;
     property CurrentStdDev: Double read FCurrentStdDev;
     property Alpha: Double read FAlpha;
@@ -302,9 +312,11 @@ type
     constructor Create(AWindowSize: Integer; AAdaptationRate: Double; const AConfig: TAnomalyDetectionConfig); overload;
     procedure ProcessValue(const AValue: Double);
     procedure UpdateNormal(const AValue: Double);
+    procedure InitializeWithNormalData(const ANormalData: TArray<Double>);
     function Detect(const AValue: Double): TAnomalyResult; override;
     procedure SaveState(const AStream: TStream); override;
     procedure LoadState(const AStream: TStream); override;
+    function IsInitialized: Boolean; override;
     property CurrentMean: Double read FMean;
     property CurrentStdDev: Double read FStdDev;
   end;
@@ -365,9 +377,12 @@ type
     FIsTrained: Boolean;
     FAveragePathLength: Double;
     FFeatureCount: Integer;
+    FAutoTrainThreshold: Integer;
+    FThreshold: Double;
     function CalculateAnomalyScore(const AInstance: TArray<Double>): Double;
     function CalculateAveragePathLength(ASize: Integer): Double;
     procedure EnsureTrainingData;
+    procedure CalculateOptimalThreshold;
   protected
     procedure CheckAndNotifyAnomaly(const AResult: TAnomalyResult);
   public
@@ -379,16 +394,24 @@ type
 
     procedure AddTrainingData(const AInstance: TArray<Double>);
     procedure Train;
+    procedure TrainFromDataset(const ADataset: TArray<TArray<Double>>);
+    procedure TrainForFraudDetection(const ATransactionData: TArray<TArray<Double>>);
+    procedure TrainForMultiSensorData(const ASensorData: TArray<TArray<Double>>);
+    procedure TrainFromCSV(const AFileName: string; ASkipHeader: Boolean = False);
+    procedure FinalizeTraining;
     function Detect(const AValue: Double): TAnomalyResult; override;
     function DetectMultiDimensional(const AInstance: TArray<Double>): TAnomalyResult;
 
     procedure SaveState(const AStream: TStream); override;
     procedure LoadState(const AStream: TStream); override;
 
+    function IsInitialized: Boolean; override;
     property NumTrees: Integer read FNumTrees;
     property SubSampleSize: Integer read FSubSampleSize;
     property IsTrained: Boolean read FIsTrained;
     property FeatureCount: Integer read FFeatureCount;
+    property AutoTrainThreshold: Integer read FAutoTrainThreshold write FAutoTrainThreshold;
+    property Threshold: Double read FThreshold write FThreshold;
   end;
 
   /// <summary>
@@ -811,6 +834,12 @@ begin
   end;
 end;
 
+procedure TThreeSigmaDetector.LearnFromHistoricalData(const AData: TArray<Double>);
+begin
+  SetHistoricalData(AData);
+  CalculateStatistics;
+end;
+
 procedure TThreeSigmaDetector.CalculateStatistics;
 var
   i: Integer;
@@ -878,6 +907,11 @@ begin
   end;
 
   FLastAnomalyState := AResult.IsAnomaly;
+end;
+
+function TThreeSigmaDetector.IsInitialized: Boolean;
+begin
+  Result := FIsCalculated;
 end;
 
 function TThreeSigmaDetector.Detect(const AValue: Double): TAnomalyResult;
@@ -1021,6 +1055,23 @@ begin
   end;
 end;
 
+procedure TSlidingWindowDetector.InitializeWindow(const AData: TArray<Double>);
+var
+  i: Integer;
+begin
+  FLock.Enter;
+  try
+    FWindowData.Clear;
+    FSum := 0;
+    FSumSquares := 0;
+
+    for i := 0 to High(AData) do
+      AddValue(AData[i]);
+  finally
+    FLock.Leave;
+  end;
+end;
+
 procedure TSlidingWindowDetector.UpdateStatisticsIncremental(const AAddedValue, ARemovedValue: Double; AHasRemoved: Boolean);
 var
   N: Integer;
@@ -1141,6 +1192,11 @@ begin
   end;
 
   FLastAnomalyState := AResult.IsAnomaly;
+end;
+
+function TSlidingWindowDetector.IsInitialized: Boolean;
+begin
+  Result := FWindowData.Count > 0;
 end;
 
 function TSlidingWindowDetector.Detect(const AValue: Double): TAnomalyResult;
@@ -1293,6 +1349,14 @@ begin
   end;
 end;
 
+procedure TEMAAnomalyDetector.WarmUp(const ABaselineData: TArray<Double>);
+var
+  i: Integer;
+begin
+  for i := 0 to High(ABaselineData) do
+    AddValue(ABaselineData[i]);
+end;
+
 procedure TEMAAnomalyDetector.CalculateLimits;
 begin
   FLowerLimit := FCurrentMean - (FConfig.SigmaMultiplier * FCurrentStdDev);
@@ -1313,6 +1377,11 @@ begin
   end;
 
   FLastAnomalyState := AResult.IsAnomaly;
+end;
+
+function TEMAAnomalyDetector.IsInitialized: Boolean;
+begin
+  Result := FInitialized;
 end;
 
 function TEMAAnomalyDetector.Detect(const AValue: Double): TAnomalyResult;
@@ -1509,6 +1578,47 @@ begin
   end;
 end;
 
+procedure TAdaptiveAnomalyDetector.InitializeWithNormalData(const ANormalData: TArray<Double>);
+var
+  i: Integer;
+  Sum, SumSquares: Double;
+  N: Integer;
+begin
+  FLock.Enter;
+  try
+    N := Length(ANormalData);
+    if N = 0 then Exit;
+
+    // Calculate initial statistics from normal data
+    Sum := 0;
+    for i := 0 to High(ANormalData) do
+      Sum := Sum + ANormalData[i];
+    FMean := Sum / N;
+
+    // Calculate initial variance
+    SumSquares := 0;
+    for i := 0 to High(ANormalData) do
+      SumSquares := SumSquares + Power(ANormalData[i] - FMean, 2);
+
+    if N > 1 then
+      FVariance := SumSquares / (N - 1)
+    else
+      FVariance := FConfig.MinStdDev * FConfig.MinStdDev;
+
+    // Ensure minimum variance
+    if FVariance < FConfig.MinStdDev * FConfig.MinStdDev then
+      FVariance := FConfig.MinStdDev * FConfig.MinStdDev;
+
+    FStdDev := Sqrt(FVariance);
+    FInitialized := True;
+    FSampleCount := N;
+
+    CalculateLimits;
+  finally
+    FLock.Leave;
+  end;
+end;
+
 procedure TAdaptiveAnomalyDetector.CalculateLimits;
 begin
   // Dynamic limits based on current statistics
@@ -1530,6 +1640,11 @@ begin
   end;
 
   FLastAnomalyState := AResult.IsAnomaly;
+end;
+
+function TAdaptiveAnomalyDetector.IsInitialized: Boolean;
+begin
+  Result := FInitialized;
 end;
 
 function TAdaptiveAnomalyDetector.Detect(const AValue: Double): TAnomalyResult;
@@ -1819,6 +1934,8 @@ begin
   FIsTrained := False;
   FAveragePathLength := 0;
   FFeatureCount := 1; // Default per dati 1D
+  FAutoTrainThreshold := 256; // Default threshold
+  FThreshold := 0.5; // Default threshold, sarà ricalcolata
   SetLength(FTrainingData, 0);
 end;
 
@@ -1843,6 +1960,13 @@ begin
 
     FFeatureCount := Length(AInstance);
     FIsTrained := False; // Require retraining
+
+    // Auto-train se raggiungiamo la soglia
+    if Length(FTrainingData) >= FAutoTrainThreshold then
+    begin
+      Train;
+      CalculateOptimalThreshold;
+    end;
   finally
     FLock.Leave;
   end;
@@ -1903,6 +2027,143 @@ begin
   end;
 end;
 
+procedure TIsolationForestDetector.TrainFromDataset(const ADataset: TArray<TArray<Double>>);
+var
+  i, j: Integer;
+  OldThreshold: Integer;
+begin
+  FLock.Enter;
+  try
+    // Disabilita temporaneamente auto-training
+    OldThreshold := FAutoTrainThreshold;
+    FAutoTrainThreshold := MaxInt;
+
+    // Clear existing training data
+    SetLength(FTrainingData, 0);
+
+    // Aggiungi direttamente senza auto-training
+    SetLength(FTrainingData, Length(ADataset));
+    for i := 0 to High(ADataset) do
+    begin
+      SetLength(FTrainingData[i], Length(ADataset[i]));
+      for j := 0 to High(ADataset[i]) do
+        FTrainingData[i][j] := ADataset[i][j];
+    end;
+
+    FFeatureCount := Length(ADataset[0]);
+    FIsTrained := False;
+
+    // Ripristina threshold
+    FAutoTrainThreshold := OldThreshold;
+
+    // Train manualmente
+    Train;
+    CalculateOptimalThreshold;
+  finally
+    FLock.Leave;
+  end;
+end;
+
+procedure TIsolationForestDetector.TrainForFraudDetection(const ATransactionData: TArray<TArray<Double>>);
+begin
+  TrainFromDataset(ATransactionData);
+  FThreshold := 0.55; // Score alto per fraud detection
+end;
+
+procedure TIsolationForestDetector.TrainForMultiSensorData(const ASensorData: TArray<TArray<Double>>);
+begin
+  TrainFromDataset(ASensorData);
+  FThreshold := 0.50; // Score alto per sensori guasti
+end;
+
+procedure TIsolationForestDetector.TrainFromCSV(const AFileName: string; ASkipHeader: Boolean);
+var
+  Lines: TStringList;
+  i, StartIdx: Integer;
+  Values: TArray<String>;
+  Instance: TArray<Double>;
+  j: Integer;
+  FormatSettings: TFormatSettings;
+begin
+  if not FileExists(AFileName) then
+    raise EAnomalyDetectionException.Create('CSV file not found: ' + AFileName);
+
+  FormatSettings := TFormatSettings.Create('en-US'); // Force decimal point
+  Lines := TStringList.Create;
+  try
+    Lines.LoadFromFile(AFileName);
+
+    StartIdx := IfThen(ASkipHeader, 1, 0);
+
+    for i := StartIdx to Lines.Count - 1 do
+    begin
+      if Trim(Lines[i]) = '' then Continue;
+
+      Values := Lines[i].Split([',']);
+      SetLength(Instance, Length(Values));
+
+      for j := 0 to High(Values) do
+      begin
+        try
+          Instance[j] := StrToFloat(Trim(Values[j]), FormatSettings);
+        except
+          on E: EConvertError do
+            raise EAnomalyDetectionException.CreateFmt('Invalid numeric value in CSV line %d, column %d: %s',
+              [i + 1, j + 1, Values[j]]);
+        end;
+      end;
+
+      AddTrainingData(Instance);
+    end;
+
+    Train;
+    CalculateOptimalThreshold;
+
+  finally
+    Lines.Free;
+  end;
+end;
+
+procedure TIsolationForestDetector.FinalizeTraining;
+begin
+  if Length(FTrainingData) > 0 then
+  begin
+    Train;
+    CalculateOptimalThreshold;
+  end;
+end;
+
+function TIsolationForestDetector.IsInitialized: Boolean;
+begin
+  Result := FIsTrained;
+end;
+
+procedure TIsolationForestDetector.CalculateOptimalThreshold;
+var
+  i: Integer;
+  Scores: TArray<Double>;
+  SortedScores: TArray<Double>;
+begin
+  if not FIsTrained or (Length(FTrainingData) = 0) then Exit;
+
+  SetLength(Scores, Min(100, Length(FTrainingData)));
+  for i := 0 to High(Scores) do
+    Scores[i] := CalculateAnomalyScore(FTrainingData[i]);
+
+  SortedScores := Copy(Scores);
+  TArray.Sort<Double>(SortedScores);
+
+  // Usa il 90° percentile come soglia (score alto = anomalia)
+  var PercentileIndex := Round(Length(SortedScores) * 0.9);
+  if PercentileIndex < Length(SortedScores) then
+    FThreshold := SortedScores[PercentileIndex]
+  else
+    FThreshold := 0.5;
+
+  // Per score alti, range 0.5-0.9
+  FThreshold := Max(0.5, Min(0.9, FThreshold));
+end;
+
 function TIsolationForestDetector.CalculateAveragePathLength(ASize: Integer): Double;
 begin
   if ASize > 2 then
@@ -1945,29 +2206,25 @@ end;
 function TIsolationForestDetector.DetectMultiDimensional(const AInstance: TArray<Double>): TAnomalyResult;
 var
   AnomalyScore: Double;
-  Threshold: Double;
 begin
   FLock.Enter;
   try
     EnsureTrainingData;
-
-    Result.Value := AInstance[0]; // Per compatibilità con interfaccia base
-
+    Result.Value := AInstance[0];
     AnomalyScore := CalculateAnomalyScore(AInstance);
 
-    // Soglia empirica: valori < 0.5 sono tipicamente anomalie
-    Threshold := 0.5;
-    Result.IsAnomaly := AnomalyScore < Threshold;
+    // CORREGGI: Score ALTO = anomalia
+    Result.IsAnomaly := AnomalyScore > FThreshold;  // Cambia da < a >
 
-    Result.ZScore := (Threshold - AnomalyScore) / 0.2; // Normalizzazione approssimativa
-    Result.LowerLimit := 0;
-    Result.UpperLimit := Threshold;
+    Result.ZScore := (AnomalyScore - FThreshold) / 0.2; // Cambia anche questo
+    Result.LowerLimit := FThreshold;  // Swap
+    Result.UpperLimit := 1.0;         // Swap
 
     if Result.IsAnomaly then
-      Result.Description := Format('ISOLATION FOREST ANOMALY: Score %.4f (threshold %.2f), easier to isolate',
-                                  [AnomalyScore, Threshold])
+      Result.Description := Format('ISOLATION FOREST ANOMALY: Score %.4f (threshold %.4f)',
+                                  [AnomalyScore, FThreshold])
     else
-      Result.Description := Format('Normal: Score %.4f (threshold %.2f)', [AnomalyScore, Threshold]);
+      Result.Description := Format('Normal: Score %.4f (threshold %.4f)', [AnomalyScore, FThreshold]);
 
     CheckAndNotifyAnomaly(Result);
   finally
@@ -2010,6 +2267,8 @@ begin
     AStream.WriteData(FIsTrained);
     AStream.WriteData(FAveragePathLength);
     AStream.WriteData(FFeatureCount);
+    AStream.WriteData(FAutoTrainThreshold);
+    AStream.WriteData(FThreshold);
 
     // Salva dati di training
     DataCount := Length(FTrainingData);
@@ -2043,6 +2302,8 @@ begin
     AStream.ReadData(FIsTrained);
     AStream.ReadData(FAveragePathLength);
     AStream.ReadData(FFeatureCount);
+    AStream.ReadData(FAutoTrainThreshold);
+    AStream.ReadData(FThreshold);
 
     // Carica dati di training
     AStream.ReadData(DataCount);
@@ -2060,6 +2321,7 @@ begin
     begin
       FIsTrained := False;
       Train;
+      CalculateOptimalThreshold;
     end;
   finally
     FLock.Leave;
