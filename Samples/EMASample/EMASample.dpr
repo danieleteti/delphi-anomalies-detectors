@@ -99,12 +99,12 @@ var
   PriceChangeVsEMA, PriceChangeDaily: Double;
 begin
   WriteColoredLine('=== REAL-TIME STOCK PRICE MONITORING ===', COLOR_INFO);
-  WriteLn('Using EMA Detector (α=0.05) for adaptive price anomaly detection');
+  WriteLn('Using EMA Detector (α=0.08) for enhanced sensitivity');
   WriteLn('Stock: TECH Corp (Simulated)');
   WriteLn;
 
-  FastDetector := TEMAAnomalyDetector.Create(0.05);
-  SlowDetector := TEMAAnomalyDetector.Create(0.01);
+  FastDetector := TEMAAnomalyDetector.Create(0.08); // Slightly more sensitive
+  SlowDetector := TEMAAnomalyDetector.Create(0.02); // Keep conservative for comparison
   try
     TotalAnomalies := 0;
     EventsDetected := 0;
@@ -170,9 +170,12 @@ begin
           end;
         end;
 
+        // CRITICAL: Detect BEFORE updating EMA to catch events properly
+        Result := FastDetector.Detect(CurrentPrice);
+
+        // Update EMA AFTER detection to preserve baseline for next detection
         FastDetector.AddValue(CurrentPrice);
         SlowDetector.AddValue(CurrentPrice);
-        Result := FastDetector.Detect(CurrentPrice);
 
         if Result.IsAnomaly then
         begin
@@ -183,34 +186,44 @@ begin
 
           if CurrentPrice > FastDetector.CurrentMean then
           begin
-            WriteColoredLine(Format('[%02d:%02d] 🚨 PRICE SPIKE: $%.2f (+%.1f%% vs EMA) Z-score: %.2f',
-              [Hour, Minute, CurrentPrice, Abs(PriceChangeVsEMA), Result.ZScore]), COLOR_PRICE_UP);
+            WriteColoredLine(Format('[%02d:%02d] 🚨 PRICE SPIKE: $%.2f (+%.1f%% vs EMA $%.2f) Z-score: %.2f',
+              [Hour, Minute, CurrentPrice, Abs(PriceChangeVsEMA), FastDetector.CurrentMean, Result.ZScore]), COLOR_PRICE_UP);
             WriteLn('   → Possible: Positive news, earnings beat, or acquisition rumors');
           end
           else
           begin
-            WriteColoredLine(Format('[%02d:%02d] 🚨 PRICE DROP: $%.2f (%.1f%% vs EMA) Z-score: %.2f',
-              [Hour, Minute, CurrentPrice, PriceChangeVsEMA, Result.ZScore]), COLOR_PRICE_DOWN);
+            WriteColoredLine(Format('[%02d:%02d] 🚨 PRICE DROP: $%.2f (%.1f%% vs EMA $%.2f) Z-score: %.2f',
+              [Hour, Minute, CurrentPrice, PriceChangeVsEMA, FastDetector.CurrentMean, Result.ZScore]), COLOR_PRICE_DOWN);
             WriteLn('   → Possible: Negative news, selloff, or market correction');
           end;
         end
-        else if (Minute mod 30) = 0 then
+        else
         begin
-          PriceChangeDaily := ((CurrentPrice - InitialPrice) / InitialPrice) * 100;
-          if PriceChangeDaily >= 0 then
-            WriteLn(Format('[%02d:%02d] ✓ Normal: $%.2f (+%.1f%% daily) EMA: $%.2f',
-              [Hour, Minute, CurrentPrice, PriceChangeDaily, FastDetector.CurrentMean]))
-          else
-            WriteLn(Format('[%02d:%02d] ✓ Normal: $%.2f (%.1f%% daily) EMA: $%.2f',
-              [Hour, Minute, CurrentPrice, PriceChangeDaily, FastDetector.CurrentMean]));
+          // Show event impact even if not detected as anomaly
+          if EventTriggered then
+          begin
+            PriceChangeVsEMA := ((CurrentPrice - FastDetector.CurrentMean) / FastDetector.CurrentMean) * 100;
+            WriteColoredLine(Format('[%02d:%02d] ⚠️  EVENT IMPACT: $%.2f (%.1f%% vs EMA $%.2f) Z-score: %.2f - Below threshold',
+              [Hour, Minute, CurrentPrice, PriceChangeVsEMA, FastDetector.CurrentMean, Result.ZScore]), COLOR_WARNING);
+          end
+          else if (Minute mod 30) = 0 then
+          begin
+            PriceChangeDaily := ((CurrentPrice - InitialPrice) / InitialPrice) * 100;
+            if PriceChangeDaily >= 0 then
+              WriteLn(Format('[%02d:%02d] ✓ Normal: $%.2f (+%.1f%% daily) EMA: $%.2f',
+                [Hour, Minute, CurrentPrice, PriceChangeDaily, FastDetector.CurrentMean]))
+            else
+              WriteLn(Format('[%02d:%02d] ✓ Normal: $%.2f (%.1f%% daily) EMA: $%.2f',
+                [Hour, Minute, CurrentPrice, PriceChangeDaily, FastDetector.CurrentMean]));
+          end;
         end;
 
         if (Hour mod 2 = 0) and (Minute = 0) and (Hour >= 10) then
         begin
           WriteLn;
           WriteColoredLine(Format('--- %02d:00 EMA Update ---', [Hour]), COLOR_INFO);
-          WriteLn(Format('Fast EMA (α=0.05): $%.2f ± $%.2f', [FastDetector.CurrentMean, FastDetector.CurrentStdDev]));
-          WriteLn(Format('Slow EMA (α=0.01): $%.2f ± $%.2f', [SlowDetector.CurrentMean, SlowDetector.CurrentStdDev]));
+          WriteLn(Format('Fast EMA (α=0.08): $%.2f ± $%.2f', [FastDetector.CurrentMean, FastDetector.CurrentStdDev]));
+          WriteLn(Format('Slow EMA (α=0.02): $%.2f ± $%.2f', [SlowDetector.CurrentMean, SlowDetector.CurrentStdDev]));
           WriteLn(Format('Price volatility: %.1f%%', [FastDetector.CurrentStdDev / FastDetector.CurrentMean * 100]));
           WriteLn(Format('Current price: $%.2f', [CurrentPrice]));
           WriteLn;
@@ -230,6 +243,20 @@ begin
     PriceChangeDaily := ((CurrentPrice - InitialPrice) / InitialPrice) * 100;
     WriteLn(Format('• Price change from open: %.1f%%', [PriceChangeDaily]));
     WriteLn(Format('• Fast EMA range: $%.2f - $%.2f', [Max(0.0, FastDetector.LowerLimit), FastDetector.UpperLimit]));
+
+    WriteLn;
+    WriteColoredLine('=== DETECTION ANALYSIS ===', COLOR_INFO);
+    if (EventsDetected / Length(MarketEvents)) >= 0.8 then
+      WriteColoredLine('✓ Excellent detection performance (80%+ events caught)', COLOR_SUCCESS)
+    else if (EventsDetected / Length(MarketEvents)) >= 0.6 then
+      WriteColoredLine('✓ Good detection performance (60%+ events caught)', COLOR_SUCCESS)
+    else if (EventsDetected / Length(MarketEvents)) >= 0.4 then
+      WriteColoredLine('⚠ Moderate detection (40%+ events) - Consider tuning sensitivity', COLOR_WARNING)
+    else
+      WriteColoredLine('⚠ Low detection rate - Detector may be under-sensitive', COLOR_WARNING);
+
+    WriteLn(Format('Sigma multiplier: %.1f (lower = more sensitive)', [FastDetector.Config.SigmaMultiplier]));
+    WriteLn(Format('Alpha parameter: %.2f (higher = faster adaptation)', [0.08]));
 
   finally
     SlowDetector.Free;

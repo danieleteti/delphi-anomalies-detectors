@@ -200,6 +200,3 @@ This creates a **bias toward recent observations** while maintaining **statistic
 
 Example: With α=0.1, the detector adapts 95% to a new level after ~30 observations.
 
----
-
-**Next Example**: [Adaptive Detector](../Adaptive/) for self-learning systems with confirmed normal data.

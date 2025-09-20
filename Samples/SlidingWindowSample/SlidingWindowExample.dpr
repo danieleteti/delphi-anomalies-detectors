@@ -15,7 +15,7 @@ uses
   System.DateUtils,
   {$IFDEF MSWINDOWS}
   WinAPI.Windows,
-  {$ENDIF }
+  {$ENDIF}
   AnomalyDetectionAlgorithms;
 
 type
@@ -107,7 +107,6 @@ var
   Result: TAnomalyResult;
   TotalAnomalies, Events: Integer;
   EventsDetected: Integer;
-  CurrentTime: TDateTime;
   EventSchedule: array[0..4] of TTrafficEvent;
   i: Integer;
 begin
@@ -164,7 +163,6 @@ begin
       for Minute := 0 to 59 do
       begin
         Traffic := SimulateWebTrafficHour(Hour);
-        CurrentTime := EncodeTime(Hour, Minute, 0, 0);
 
         // Check for scheduled events
         var EventTriggered := False;
@@ -180,9 +178,11 @@ begin
           end;
         end;
 
-        // Add to sliding window and detect
-        Detector.AddValue(Traffic);
+        // CRITICAL: Detect BEFORE updating sliding window
         Result := Detector.Detect(Traffic);
+
+        // Add to sliding window AFTER detection
+        Detector.AddValue(Traffic);
 
         if Result.IsAnomaly then
         begin
