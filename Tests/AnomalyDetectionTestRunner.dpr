@@ -48,7 +48,7 @@ begin
     runner.AddLogger(nunitLogger);
 
     // When true, text output will contain more detail
-    runner.FailsOnNoAsserts := False;
+    runner.FailsOnNoAsserts := True;
 
     // Run the tests
     results := runner.Execute;

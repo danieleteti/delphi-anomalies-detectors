@@ -1166,6 +1166,7 @@ begin
   Assert.IsFalse(Result.IsAnomaly, 'Normal sensor reading should not be anomaly');
 end;
 
+// Alternativa per TestCSVTraining - evita Random durante Format
 procedure TIsolationForestDetectorTests.TestCSVTraining;
 var
   CSVFileName: string;
@@ -1174,39 +1175,45 @@ var
   Instance: TArray<Double>;
   Result: TAnomalyResult;
   FormatSettings: TFormatSettings;
+  X, Y, Z: Double; // Valori espliciti
 begin
-  // Usa format settings per garantire punto come separatore decimale
   FormatSettings := TFormatSettings.Create('en-US');
 
-  // Create temporary CSV file
   CSVFileName := 'test_data.csv';
   CSVContent := TStringList.Create;
   try
     CSVContent.Add('X,Y,Z'); // Header
 
-    // Add normal data rows - usa FormatSettings specifici
+    // Genera valori esplicitamente senza Random dentro Format
     for i := 1 to 100 do
-      CSVContent.Add(Format('%d,%d,%d', [
-        100 + Random(20) - 10,
-        50 + Random(16) - 8,
-        25 + Random(10) - 5
-      ], FormatSettings)); // Passa FormatSettings
+    begin
+      X := 100 + Random(20) - 10;
+      Y := 50 + Random(16) - 8;
+      Z := 25 + Random(10) - 5;
+
+      // Usa FloatToStr invece di Format %g
+      CSVContent.Add(
+        FloatToStr(X, FormatSettings) + ',' +
+        FloatToStr(Y, FormatSettings) + ',' +
+        FloatToStr(Z, FormatSettings)
+      );
+    end;
 
     CSVContent.SaveToFile(CSVFileName);
 
-    // Train from CSV - Metodo da implementare
-    FDetector.TrainFromCSV(CSVFileName, True); // Skip header
+    // Train from CSV
+    FDetector.TrainFromCSV(CSVFileName, True);
 
     Assert.IsTrue(FDetector.IsTrained, 'Should be trained from CSV');
     Assert.AreEqual<Integer>(3, FDetector.FeatureCount, 'Should detect 3 features from CSV');
 
     // Test detection
     SetLength(Instance, 3);
-    Instance := [100, 50, 25]; // Normal point
+    Instance := [100, 50, 25];
     Result := FDetector.DetectMultiDimensional(Instance);
     Assert.IsFalse(Result.IsAnomaly, 'Normal point should not be anomaly');
 
-    Instance := [300, 300, 300]; // Anomaly
+    Instance := [300, 300, 300];
     Result := FDetector.DetectMultiDimensional(Instance);
     Assert.IsTrue(Result.IsAnomaly, 'Anomaly should be detected');
 
