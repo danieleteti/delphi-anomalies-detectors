@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cat:*)",
+      "Bash(find:*)",
+      "Bash(msbuild:*)",
+      "Bash(cmd /c:*)",
+      "Bash(where msbuild)",
+      "Bash(dir:*)",
+      "Bash(findstr:*)",
+      "Read(//c/Program Files (x86)/Embarcadero/Studio/37.0/bin/**)",
+      "Bash(\"C:\\Program Files (x86)\\Embarcadero\\Studio\\37.0\\bin\\dcc32.exe\" -B TestsAnomalyDetectionTestRunner.dpr)",
+      "Bash(\"C:\\Program Files (x86)\\Embarcadero\\Studio\\37.0\\bin\\dcc32.exe\" -B AnomalyDetectionTestRunner.dpr)",
+      "Bash(\"C:\\Program Files (x86)\\Embarcadero\\Studio\\37.0\\bin\\dcc32.exe\" -B -U..srcCore)",
+      "Bash(..srcDetectors)",
+      "Bash(..src -I..srcCore)",
+      "Bash(..src AnomalyDetectionTestRunner.dpr)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

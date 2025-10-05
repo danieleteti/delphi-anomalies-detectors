@@ -24,8 +24,7 @@ uses
   DUnitX.Extensibility,
   DUnitX.TestRunner,
   DUnitX.TestFramework,
-  AnomalyDetectionAlgorithmsTests in 'AnomalyDetectionAlgorithmsTests.pas',
-  AnomalyDetectionAlgorithms in '..\AnomalyDetectionAlgorithms.pas';
+  AnomalyDetectionAlgorithmsTests in 'AnomalyDetectionAlgorithmsTests.pas';
 
 var
   runner: ITestRunner;

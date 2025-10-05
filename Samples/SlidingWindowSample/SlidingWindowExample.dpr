@@ -16,7 +16,9 @@ uses
   {$IFDEF MSWINDOWS}
   WinAPI.Windows,
   {$ENDIF}
-  AnomalyDetectionAlgorithms;
+  AnomalyDetection.Factory,
+  AnomalyDetection.Types,
+  AnomalyDetection.SlidingWindow;
 
 type
   TTrafficEvent = record

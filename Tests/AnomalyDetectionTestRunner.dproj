@@ -121,7 +121,6 @@
             <MainSource>MainSource</MainSource>
         </DelphiCompile>
         <DCCReference Include="AnomalyDetectionAlgorithmsTests.pas"/>
-        <DCCReference Include="..\AnomalyDetectionAlgorithms.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

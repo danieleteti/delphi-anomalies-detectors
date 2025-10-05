@@ -15,7 +15,9 @@ uses
   {$IFDEF MSWINDOWS}
   WinAPI.Windows,
   {$ENDIF }
-  AnomalyDetectionAlgorithms;
+  AnomalyDetection.Factory,
+  AnomalyDetection.Types,
+  AnomalyDetection.ThreeSigma;
 
 const
   // Console colors for Windows

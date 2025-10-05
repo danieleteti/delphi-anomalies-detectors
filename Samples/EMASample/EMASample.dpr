@@ -16,7 +16,9 @@ uses
   {$IFDEF MSWINDOWS}
   WinAPI.Windows,
   {$ENDIF}
-  AnomalyDetectionAlgorithms;
+  AnomalyDetection.Factory,
+  AnomalyDetection.Types,
+  AnomalyDetection.EMA;
 
 type
   TMarketEvent = record

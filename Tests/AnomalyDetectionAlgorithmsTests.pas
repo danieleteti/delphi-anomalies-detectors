@@ -16,11 +16,21 @@ interface
 
 uses
   DUnitX.TestFramework,
-  AnomalyDetectionAlgorithms,
   System.SysUtils,
   System.Math,
   System.Classes,
-  System.DateUtils;
+  System.DateUtils,
+  // New modular structure
+  AnomalyDetection.Types,
+  AnomalyDetection.Base,
+  AnomalyDetection.Factory,
+  AnomalyDetection.ThreeSigma,
+  AnomalyDetection.SlidingWindow,
+  AnomalyDetection.EMA,
+  AnomalyDetection.Adaptive,
+  AnomalyDetection.IsolationForest,
+  AnomalyDetection.Performance,
+  AnomalyDetection.Confirmation;
 
 type
   [TestFixture]

@@ -1,4 +1,0 @@
-digraph AnomalyDetectionDemo {
-	AnomalyDetectionDemo -> AnomalyDetectionAlgorithms
-	AnomalyDetectionAlgorithms
-}
