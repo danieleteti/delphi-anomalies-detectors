@@ -19,7 +19,8 @@ uses
   AnomalyDetection.SlidingWindow,
   AnomalyDetection.EMA,
   AnomalyDetection.Adaptive,
-  AnomalyDetection.IsolationForest;
+  AnomalyDetection.IsolationForest,
+  AnomalyDetection.DBSCAN;
 
 type
   /// <summary>
@@ -81,6 +82,16 @@ type
     /// </summary>
     class function CreateIsolationForest(ANumTrees: Integer; ASubSampleSize: Integer; AMaxDepth: Integer; const AConfig: TAnomalyDetectionConfig): TIsolationForestDetector; overload;
 
+    /// <summary>
+    /// Create DBSCAN detector (Density-Based Spatial Clustering)
+    /// </summary>
+    class function CreateDBSCAN(AEpsilon: Double = 0.5; AMinPoints: Integer = 5; ADimensions: Integer = 1): TDBSCANDetector; overload;
+
+    /// <summary>
+    /// Create DBSCAN detector with custom config
+    /// </summary>
+    class function CreateDBSCAN(AEpsilon: Double; AMinPoints: Integer; ADimensions: Integer; const AConfig: TAnomalyDetectionConfig): TDBSCANDetector; overload;
+
     // ========================================================================
     // PRE-CONFIGURED DETECTORS - For common use cases
     // ========================================================================
@@ -120,6 +131,12 @@ type
     /// Uses EMA for immediate response
     /// </summary>
     class function CreateForRealTimeStreaming(AAlpha: Double = 0.1): TBaseAnomalyDetector;
+
+    /// <summary>
+    /// Create detector for spatial/geographical anomalies
+    /// Uses DBSCAN for density-based detection
+    /// </summary>
+    class function CreateForSpatialData(ADimensions: Integer = 2): TBaseAnomalyDetector;
   end;
 
 implementation
@@ -232,11 +249,31 @@ end;
 
 class function TAnomalyDetectorFactory.CreateForRealTimeStreaming(AAlpha: Double): TBaseAnomalyDetector;
 var
-  Config: TAnomalyDetectionConfig;
+  lConfig: TAnomalyDetectionConfig;
 begin
-  Config := TAnomalyDetectionConfig.Default;
-  Config.SigmaMultiplier := 2.5; // Balanced sensitivity
-  Result := CreateEMA(AAlpha, Config);
+  lConfig := TAnomalyDetectionConfig.Default;
+  lConfig.SigmaMultiplier := 2.5; // Balanced sensitivity
+  Result := CreateEMA(AAlpha, lConfig);
+end;
+
+class function TAnomalyDetectorFactory.CreateDBSCAN(AEpsilon: Double; AMinPoints: Integer; ADimensions: Integer): TDBSCANDetector;
+begin
+  Result := TDBSCANDetector.Create(AEpsilon, AMinPoints, ADimensions);
+end;
+
+class function TAnomalyDetectorFactory.CreateDBSCAN(AEpsilon: Double; AMinPoints: Integer; ADimensions: Integer; const AConfig: TAnomalyDetectionConfig): TDBSCANDetector;
+begin
+  Result := TDBSCANDetector.Create(AEpsilon, AMinPoints, ADimensions);
+  Result.Config := AConfig;
+end;
+
+class function TAnomalyDetectorFactory.CreateForSpatialData(ADimensions: Integer): TBaseAnomalyDetector;
+var
+  lConfig: TAnomalyDetectionConfig;
+begin
+  lConfig := TAnomalyDetectionConfig.Default;
+  lConfig.SigmaMultiplier := 2.0; // Sensitive to outliers
+  Result := CreateDBSCAN(0.5, 10, ADimensions, lConfig);
 end;
 
 end.

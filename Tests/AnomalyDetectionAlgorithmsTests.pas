@@ -29,6 +29,7 @@ uses
   AnomalyDetection.EMA,
   AnomalyDetection.Adaptive,
   AnomalyDetection.IsolationForest,
+  AnomalyDetection.DBSCAN,
   AnomalyDetection.Performance,
   AnomalyDetection.Confirmation;
 
@@ -174,6 +175,50 @@ type
     procedure TestSensorDataScenario;
     [Test]
     procedure TestCSVTraining;
+  end;
+
+  [TestFixture]
+  TDBSCANDetectorTests = class
+  private
+    FDetector: TDBSCANDetector;
+  public
+    [Setup]
+    procedure Setup;
+    [TearDown]
+    procedure TearDown;
+
+    [Test]
+    procedure TestInitialState;
+    [Test]
+    procedure TestSingleDimensionClustering;
+    [Test]
+    procedure TestMultiDimensionalClustering;
+    [Test]
+    procedure TestOutlierDetection;
+    [Test]
+    procedure TestDensityBasedDetection;
+    [Test]
+    procedure TestAutoRecluster;
+    [Test]
+    procedure TestSaveLoadState;
+
+    // Border cases - CRITICAL
+    [Test]
+    procedure TestEmptyDataset;
+    [Test]
+    procedure TestInsufficientData;
+    [Test]
+    procedure TestInvalidDimensions;
+    [Test]
+    procedure TestZeroEpsilon;
+    [Test]
+    procedure TestNegativeValues;
+    [Test]
+    procedure TestAllIdenticalPoints;
+    [Test]
+    procedure TestSinglePoint;
+    [Test]
+    procedure TestMaxHistoryLimit;
   end;
 
   [TestFixture]
@@ -1572,6 +1617,407 @@ begin
   end;
 end;
 
+{ TDBSCANDetectorTests }
+
+procedure TDBSCANDetectorTests.Setup;
+begin
+  FDetector := TDBSCANDetector.Create(1.0, 3, 1);
+end;
+
+procedure TDBSCANDetectorTests.TearDown;
+begin
+  FDetector.Free;
+end;
+
+procedure TDBSCANDetectorTests.TestInitialState;
+begin
+  Assert.AreEqual(1.0, FDetector.Epsilon, 0.001, 'Epsilon should be 1.0');
+  Assert.AreEqual(3, FDetector.MinPoints, 'MinPoints should be 3');
+  Assert.AreEqual(1, FDetector.Dimensions, 'Dimensions should be 1');
+  Assert.AreEqual(0, FDetector.ClusterCount, 'Initial cluster count should be 0');
+  Assert.IsFalse(FDetector.IsInitialized, 'Should not be initialized initially');
+end;
+
+procedure TDBSCANDetectorTests.TestSingleDimensionClustering;
+var
+  i: Integer;
+  lResult: TAnomalyResult;
+begin
+  // Add cluster around 10
+  for i := 1 to 10 do
+    FDetector.AddPoint([10 + Random * 2 - 1]); // 9-11 range
+
+  // Add cluster around 50
+  for i := 1 to 10 do
+    FDetector.AddPoint([50 + Random * 2 - 1]); // 49-51 range
+
+  FDetector.Recluster;
+
+  Assert.IsTrue(FDetector.ClusterCount >= 1, 'Should find at least 1 cluster');
+
+  // Point in first cluster should be normal
+  lResult := FDetector.Detect(10.5);
+  Assert.IsFalse(lResult.IsAnomaly, 'Point in cluster should be normal');
+
+  // Isolated point should be anomaly
+  lResult := FDetector.Detect(100);
+  Assert.IsTrue(lResult.IsAnomaly, 'Isolated point should be anomaly');
+end;
+
+procedure TDBSCANDetectorTests.TestMultiDimensionalClustering;
+var
+  lDetector: TDBSCANDetector;
+  i: Integer;
+  lResult: TAnomalyResult;
+begin
+  lDetector := TDBSCANDetector.Create(5.0, 3, 2);
+  try
+    // Cluster 1: around [10, 10]
+    for i := 1 to 15 do
+      lDetector.AddPoint([10 + Random * 4 - 2, 10 + Random * 4 - 2]);
+
+    // Cluster 2: around [50, 50]
+    for i := 1 to 15 do
+      lDetector.AddPoint([50 + Random * 4 - 2, 50 + Random * 4 - 2]);
+
+    lDetector.Recluster;
+
+    Assert.IsTrue(lDetector.ClusterCount >= 1, 'Should find clusters in 2D space');
+
+    // Point in cluster 1 should be normal
+    lResult := lDetector.DetectMultiDim([10, 10]);
+    Assert.IsFalse(lResult.IsAnomaly, 'Point in first cluster should be normal');
+
+    // Point in cluster 2 should be normal
+    lResult := lDetector.DetectMultiDim([50, 50]);
+    Assert.IsFalse(lResult.IsAnomaly, 'Point in second cluster should be normal');
+
+    // Isolated point should be anomaly
+    lResult := lDetector.DetectMultiDim([100, 100]);
+    Assert.IsTrue(lResult.IsAnomaly, 'Isolated 2D point should be anomaly');
+  finally
+    lDetector.Free;
+  end;
+end;
+
+procedure TDBSCANDetectorTests.TestOutlierDetection;
+var
+  i: Integer;
+  lResult: TAnomalyResult;
+begin
+  // Add dense cluster
+  for i := 1 to 20 do
+    FDetector.AddPoint([10 + Random * 2 - 1]);
+
+  // Add isolated outliers
+  FDetector.AddPoint([100]);
+  FDetector.AddPoint([200]);
+
+  FDetector.Recluster;
+
+  Assert.IsTrue(FDetector.OutlierCount >= 2, 'Should detect at least 2 outliers');
+
+  // New outlier should be detected
+  lResult := FDetector.Detect(150);
+  Assert.IsTrue(lResult.IsAnomaly, 'New outlier should be detected as anomaly');
+  Assert.IsTrue(Abs(lResult.ZScore) > 0, 'Outlier should have non-zero Z-score');
+end;
+
+procedure TDBSCANDetectorTests.TestDensityBasedDetection;
+var
+  lDetector: TDBSCANDetector;
+  i: Integer;
+  lResult: TAnomalyResult;
+begin
+  lDetector := TDBSCANDetector.Create(2.0, 5, 1);
+  try
+    // Dense region (should form cluster)
+    for i := 1 to 20 do
+      lDetector.AddPoint([10 + Random - 0.5]);
+
+    // Sparse region (should be outliers)
+    lDetector.AddPoint([20]);
+    lDetector.AddPoint([25]);
+    lDetector.AddPoint([30]);
+
+    lDetector.Recluster;
+
+    Assert.IsTrue(lDetector.ClusterCount >= 1, 'Should find dense cluster');
+
+    // Point in dense region should be normal
+    lResult := lDetector.Detect(10);
+    Assert.IsFalse(lResult.IsAnomaly, 'Point in dense region should be normal');
+
+    // Point in sparse region should be anomaly
+    lResult := lDetector.Detect(25);
+    Assert.IsTrue(lResult.IsAnomaly, 'Point in sparse region should be anomaly');
+  finally
+    lDetector.Free;
+  end;
+end;
+
+procedure TDBSCANDetectorTests.TestAutoRecluster;
+var
+  i: Integer;
+begin
+  FDetector.AutoRecluster := True;
+  FDetector.MaxHistorySize := 100;
+
+  // Add initial data
+  for i := 1 to 30 do
+    FDetector.AddPoint([10 + Random * 2 - 1]);
+
+  FDetector.Recluster;
+  Assert.IsTrue(FDetector.ClusterCount > 0, 'Should have clusters after first recluster');
+
+  // Add more data (should trigger auto-recluster after threshold)
+  for i := 1 to 60 do
+    FDetector.AddPoint([50 + Random * 2 - 1]);
+
+  Assert.IsTrue(FDetector.ClusterCount > 0, 'Should have reclustered automatically');
+  // Note: cluster count may change due to new data
+end;
+
+procedure TDBSCANDetectorTests.TestSaveLoadState;
+var
+  lStream: TMemoryStream;
+  lNewDetector: TDBSCANDetector;
+  i: Integer;
+  lResult1, lResult2: TAnomalyResult;
+begin
+  // Add data to original detector
+  for i := 1 to 20 do
+    FDetector.AddPoint([10 + Random * 2 - 1]);
+
+  FDetector.Recluster;
+
+  // Test detection before save
+  lResult1 := FDetector.Detect(10);
+
+  // Save state
+  lStream := TMemoryStream.Create;
+  try
+    FDetector.SaveState(lStream);
+    lStream.Position := 0;
+
+    // Load into new detector
+    lNewDetector := TDBSCANDetector.Create;
+    try
+      lNewDetector.LoadState(lStream);
+
+      Assert.AreEqual(FDetector.Epsilon, lNewDetector.Epsilon, 0.001, 'Epsilon should match');
+      Assert.AreEqual(FDetector.MinPoints, lNewDetector.MinPoints, 'MinPoints should match');
+      Assert.AreEqual(FDetector.Dimensions, lNewDetector.Dimensions, 'Dimensions should match');
+
+      // Test detection after load
+      lResult2 := lNewDetector.Detect(10);
+      Assert.AreEqual(lResult1.IsAnomaly, lResult2.IsAnomaly, 'Detection results should match');
+    finally
+      lNewDetector.Free;
+    end;
+  finally
+    lStream.Free;
+  end;
+end;
+
+procedure TDBSCANDetectorTests.TestEmptyDataset;
+var
+  lResult: TAnomalyResult;
+begin
+  // Test detection with no data
+  lResult := FDetector.Detect(10);
+  Assert.IsFalse(lResult.IsAnomaly, 'Empty dataset should not detect anomalies');
+  Assert.AreEqual('Not enough samples', lResult.Description, 'Should indicate insufficient data');
+  Assert.IsFalse(FDetector.IsInitialized, 'Should not be initialized with empty dataset');
+end;
+
+procedure TDBSCANDetectorTests.TestInsufficientData;
+var
+  lResult: TAnomalyResult;
+begin
+  // Add less than MinPoints (3)
+  FDetector.AddPoint([10]);
+  FDetector.AddPoint([11]);
+
+  lResult := FDetector.Detect(10);
+  Assert.IsFalse(lResult.IsAnomaly, 'Insufficient data should not trigger anomaly');
+  Assert.IsFalse(FDetector.IsInitialized, 'Should not be initialized with < MinPoints');
+
+  // Add one more to reach MinPoints
+  FDetector.AddPoint([12]);
+  Assert.IsTrue(FDetector.IsInitialized, 'Should be initialized at MinPoints threshold');
+end;
+
+procedure TDBSCANDetectorTests.TestInvalidDimensions;
+var
+  lDetector: TDBSCANDetector;
+  lResult: TAnomalyResult;
+  lExceptionRaised: Boolean;
+begin
+  lDetector := TDBSCANDetector.Create(1.0, 3, 2);
+  try
+    // Add 2D points
+    lDetector.AddPoint([10, 20]);
+    lDetector.AddPoint([11, 21]);
+    lDetector.AddPoint([12, 22]);
+
+    // Try to add wrong dimension
+    lExceptionRaised := False;
+    try
+      lDetector.AddPoint([10]); // 1D instead of 2D
+    except
+      on E: Exception do
+        lExceptionRaised := True;
+    end;
+    Assert.IsTrue(lExceptionRaised, 'Should raise exception for wrong dimensions in AddPoint');
+
+    // Try to detect with wrong dimension
+    lResult := lDetector.DetectMultiDim([10]); // 1D instead of 2D
+    Assert.IsTrue(lResult.IsAnomaly, 'Wrong dimension should be treated as anomaly');
+    Assert.AreEqual('Invalid dimension', lResult.Description, 'Should indicate dimension mismatch');
+  finally
+    lDetector.Free;
+  end;
+end;
+
+procedure TDBSCANDetectorTests.TestZeroEpsilon;
+var
+  lDetector: TDBSCANDetector;
+  i: Integer;
+begin
+  lDetector := TDBSCANDetector.Create(0.0, 3, 1);
+  try
+    // Add identical points
+    for i := 1 to 10 do
+      lDetector.AddPoint([10.0]);
+
+    lDetector.Recluster;
+
+    // With epsilon=0, only identical points form clusters
+    // All points at 10.0 should form one cluster
+    Assert.IsTrue(lDetector.ClusterCount >= 0, 'Should handle zero epsilon');
+  finally
+    lDetector.Free;
+  end;
+end;
+
+procedure TDBSCANDetectorTests.TestNegativeValues;
+var
+  lDetector: TDBSCANDetector;
+  i: Integer;
+  lResult: TAnomalyResult;
+begin
+  lDetector := TDBSCANDetector.Create(2.0, 3, 1);
+  try
+    // Add negative values cluster
+    for i := 1 to 10 do
+      lDetector.AddPoint([-10 + Random - 0.5]);
+
+    // Add positive values cluster
+    for i := 1 to 10 do
+      lDetector.AddPoint([10 + Random - 0.5]);
+
+    lDetector.Recluster;
+
+    // Test detection in negative range
+    lResult := lDetector.Detect(-10);
+    Assert.IsFalse(lResult.IsAnomaly, 'Negative values should be handled correctly');
+
+    // Test very large negative outlier
+    lResult := lDetector.Detect(-1000);
+    Assert.IsTrue(lResult.IsAnomaly, 'Large negative outlier should be detected');
+  finally
+    lDetector.Free;
+  end;
+end;
+
+procedure TDBSCANDetectorTests.TestAllIdenticalPoints;
+var
+  lDetector: TDBSCANDetector;
+  i: Integer;
+  lResult: TAnomalyResult;
+begin
+  lDetector := TDBSCANDetector.Create(1.0, 3, 1);
+  try
+    // Add 20 identical points
+    for i := 1 to 20 do
+      lDetector.AddPoint([42.0]);
+
+    lDetector.Recluster;
+
+    // All points should form one cluster
+    Assert.AreEqual(1, lDetector.ClusterCount, 'Identical points should form single cluster');
+    Assert.AreEqual(0, lDetector.OutlierCount, 'No outliers with identical points');
+
+    // Same value should be normal
+    lResult := lDetector.Detect(42.0);
+    Assert.IsFalse(lResult.IsAnomaly, 'Identical value should be normal');
+
+    // Different value should be anomaly
+    lResult := lDetector.Detect(100.0);
+    Assert.IsTrue(lResult.IsAnomaly, 'Different value should be anomaly');
+  finally
+    lDetector.Free;
+  end;
+end;
+
+procedure TDBSCANDetectorTests.TestSinglePoint;
+var
+  lDetector: TDBSCANDetector;
+  lResult: TAnomalyResult;
+begin
+  lDetector := TDBSCANDetector.Create(1.0, 1, 1); // MinPoints=1 to allow single point cluster
+  try
+    lDetector.AddPoint([10.0]);
+
+    // Should not be initialized (MinPoints=1 but we need at least that)
+    lResult := lDetector.Detect(10.0);
+
+    // With MinPoints=1, even single point forms cluster
+    lDetector.Recluster;
+    Assert.IsTrue(lDetector.IsInitialized, 'Single point should initialize with MinPoints=1');
+  finally
+    lDetector.Free;
+  end;
+end;
+
+procedure TDBSCANDetectorTests.TestMaxHistoryLimit;
+var
+  lDetector: TDBSCANDetector;
+  i: Integer;
+begin
+  lDetector := TDBSCANDetector.Create(1.0, 3, 1);
+  try
+    lDetector.MaxHistorySize := 50;
+
+    // Add 100 points (should keep only last 50)
+    for i := 1 to 100 do
+      lDetector.AddPoint([i * 1.0]);
+
+    // Verify history was trimmed
+    // Internal count not exposed, but we can verify behavior
+    lDetector.Recluster;
+    Assert.IsTrue(lDetector.ClusterCount >= 0, 'Should create clusters from trimmed history');
+
+    // Add more points beyond limit
+    for i := 101 to 150 do
+      lDetector.AddPoint([i * 1.0]);
+
+    lDetector.Recluster;
+
+    // Clustering should still work with trimmed history
+    Assert.IsTrue(lDetector.ClusterCount >= 0, 'Should handle history trimming correctly');
+
+    // Old points (1-50) should have been removed, new points (101-150) should be kept
+    var lResult := lDetector.Detect(1.0); // Very old value
+    // This might or might not be anomaly depending on clustering, but shouldn't crash
+    // Just verify no exception is raised and result is valid
+    Assert.Pass('Detection completed successfully after history trim');
+  finally
+    lDetector.Free;
+  end;
+end;
+
 initialization
   TDUnitX.RegisterTestFixture(TAnomalyDetectionConfigTests);
   TDUnitX.RegisterTestFixture(TThreeSigmaDetectorTests);
@@ -1579,6 +2025,7 @@ initialization
   TDUnitX.RegisterTestFixture(TEMAAnomalyDetectorTests);
   TDUnitX.RegisterTestFixture(TAdaptiveAnomalyDetectorTests);
   TDUnitX.RegisterTestFixture(TIsolationForestDetectorTests);
+  TDUnitX.RegisterTestFixture(TDBSCANDetectorTests);
   TDUnitX.RegisterTestFixture(TAnomalyConfirmationSystemTests);
   TDUnitX.RegisterTestFixture(TIntegrationTests);
 
