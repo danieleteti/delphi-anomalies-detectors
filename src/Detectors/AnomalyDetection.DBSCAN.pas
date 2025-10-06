@@ -249,10 +249,15 @@ begin
         // Point is normal if it's close to a cluster
         Result.IsAnomaly := (lNearestCluster = -1);
         if lNearestCluster = -1 then
-          Result.Description := 'Not in any cluster'
+        begin
+          Result.Description := 'Not in any cluster';
+          Result.ZScore := (FMinPoints - lNeighbors.Count) / Max(1.0, Sqrt(FMinPoints));
+        end
         else
+        begin
           Result.Description := 'Normal';
-        Result.ZScore := lMinDistance / FEpsilon;
+          Result.ZScore := lMinDistance / FEpsilon;
+        end;
       end;
     finally
       lNeighbors.Free;
