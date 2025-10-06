@@ -33,7 +33,7 @@ type
   /// Best for: Multi-dimensional data, outlier detection, spatial anomalies
   /// Use cases: Network intrusion, fraud detection, sensor networks, log analysis
   /// </summary>
-  TDBSCANDetector = class(TBaseAnomalyDetector)
+  TDBSCANDetector = class(TBaseAnomalyDetector, IDensityAnomalyDetector)
   private
     FLock: TCriticalSection;
     FPoints: TList<TDBSCANPoint>;
@@ -51,7 +51,14 @@ type
     function ExpandCluster(APointIndex: Integer; const ANeighbors: TList<Integer>; AClusterID: Integer): Boolean;
     procedure PerformClustering;
     procedure TrimHistory;
+
+    // Interface implementation
+    function GetDimensions: Integer;
   public
+    // IDensityAnomalyDetector interface methods
+    procedure AddTrainingData(const AInstance: TArray<Double>);
+    procedure Train;
+    function DetectMultiDimensional(const AInstance: TArray<Double>): TAnomalyResult;
     constructor Create(AEpsilon: Double = 0.5; AMinPoints: Integer = 5; ADimensions: Integer = 1); reintroduce;
     destructor Destroy; override;
 
@@ -515,6 +522,41 @@ begin
   finally
     FLock.Leave;
   end;
+end;
+
+// IDensityAnomalyDetector interface implementation
+
+function TDBSCANDetector.GetDimensions: Integer;
+begin
+  Result := FDimensions;
+end;
+
+procedure TDBSCANDetector.AddTrainingData(const AInstance: TArray<Double>);
+var
+  lPoint: TDBSCANPoint;
+  i: Integer;
+begin
+  FLock.Enter;
+  try
+    SetLength(lPoint.Values, Length(AInstance));
+    for i := 0 to High(AInstance) do
+      lPoint.Values[i] := AInstance[i];
+    lPoint.ClusterID := 0;
+    lPoint.IsVisited := False;
+    FPoints.Add(lPoint);
+  finally
+    FLock.Leave;
+  end;
+end;
+
+procedure TDBSCANDetector.Train;
+begin
+  Recluster;
+end;
+
+function TDBSCANDetector.DetectMultiDimensional(const AInstance: TArray<Double>): TAnomalyResult;
+begin
+  Result := DetectMultiDim(AInstance);
 end;
 
 end.

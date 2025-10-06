@@ -21,7 +21,7 @@ type
   /// Exponential Moving Average for adaptive anomaly detection
   /// Best for: Real-time adaptation, trending data, minimal memory
   /// </summary>
-  TEMAAnomalyDetector = class(TBaseAnomalyDetector)
+  TEMAAnomalyDetector = class(TBaseAnomalyDetector, IStatisticalAnomalyDetector)
   private
     FAlpha: Double;
     FCurrentMean: Double;
@@ -31,12 +31,18 @@ type
     FLowerLimit: Double;
     FUpperLimit: Double;
     procedure CalculateLimits;
+
+    // Interface implementation
+    function GetMean: Double;
+    function GetStdDev: Double;
+    function GetLowerLimit: Double;
+    function GetUpperLimit: Double;
   protected
     procedure CheckAndNotifyAnomaly(const AResult: TAnomalyResult);
   public
     constructor Create(AAlpha: Double = 0.1); overload;
     constructor Create(AAlpha: Double; const AConfig: TAnomalyDetectionConfig); overload;
-    procedure AddValue(const AValue: Double);
+    procedure AddValue(const AValue: Double); override;
     procedure WarmUp(const ABaselineData: TArray<Double>);
     function Detect(const AValue: Double): TAnomalyResult; override;
     procedure SaveState(const AStream: TStream); override;
@@ -212,6 +218,28 @@ begin
   finally
     FLock.Leave;
   end;
+end;
+
+// IStatisticalAnomalyDetector interface implementation
+
+function TEMAAnomalyDetector.GetMean: Double;
+begin
+  Result := FCurrentMean;
+end;
+
+function TEMAAnomalyDetector.GetStdDev: Double;
+begin
+  Result := FCurrentStdDev;
+end;
+
+function TEMAAnomalyDetector.GetLowerLimit: Double;
+begin
+  Result := FLowerLimit;
+end;
+
+function TEMAAnomalyDetector.GetUpperLimit: Double;
+begin
+  Result := FUpperLimit;
 end;
 
 end.

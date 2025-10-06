@@ -87,8 +87,9 @@ begin
     WriteColoredLine('Step 1: Loading historical temperature data (30 days)...', COLOR_INFO);
     HistoricalData := GenerateHistoricalTemperatures;
 
-    // Use the learning method
-    Detector.LearnFromHistoricalData(HistoricalData);
+    // Add historical data and build the model
+    Detector.AddValues(HistoricalData);
+    Detector.Build;
     
     WriteColoredLine('✓ Historical analysis completed', COLOR_SUCCESS);
     WriteLn(Format('  Normal temperature range: %.1f°C - %.1f°C', 

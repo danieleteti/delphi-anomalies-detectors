@@ -309,7 +309,8 @@ begin
   Assert.WillRaise(
     procedure
     begin
-      FDetector.LearnFromHistoricalData(EmptyData);
+      FDetector.AddValues(EmptyData);
+      FDetector.Build;
     end,
     EAnomalyDetectionException
   );
@@ -324,7 +325,8 @@ begin
   Assert.WillRaise(
     procedure
     begin
-      FDetector.LearnFromHistoricalData(SingleData);
+      FDetector.AddValues(SingleData);
+      FDetector.Build;
     end,
     EAnomalyDetectionException
   );
@@ -350,7 +352,8 @@ begin
   for var i := 0 to 9 do
     Data[i] := 100 + i;
 
-  FDetector.LearnFromHistoricalData(Data);
+  FDetector.AddValues(Data);
+  FDetector.Build;
   Assert.IsTrue(FDetector.IsInitialized, 'Should be initialized after learning');
 
   // Should work now
@@ -369,7 +372,8 @@ begin
   for i := 0 to 99 do
     Data[i] := 100 + (i mod 20) - 10; // Generates values 90-109
 
-  FDetector.LearnFromHistoricalData(Data);
+  FDetector.AddValues(Data);
+  FDetector.Build;
 
   // Test values within normal range
   Result := FDetector.Detect(100);
@@ -393,7 +397,8 @@ begin
   for i := 0 to 49 do
     Data[i] := 100 + Random(10) - 5; // Values ~95-105
 
-  FDetector.LearnFromHistoricalData(Data);
+  FDetector.AddValues(Data);
+  FDetector.Build;
 
   // Test clear anomalies
   Result := FDetector.Detect(200);
@@ -423,7 +428,8 @@ begin
   for i := 0 to 99 do
     Data[i] := 100 + Random(20) - 10;
 
-  FDetector.LearnFromHistoricalData(Data);
+  FDetector.AddValues(Data);
+  FDetector.Build;
 
   // Value at 2.5 sigma should now be anomaly
   var TestValue := FDetector.Mean + 2.5 * FDetector.StdDev;
@@ -442,7 +448,8 @@ begin
   for i := 0 to 49 do
     Data[i] := 100;
 
-  FDetector.LearnFromHistoricalData(Data);
+  FDetector.AddValues(Data);
+  FDetector.Build;
 
   // Should use MinStdDev
   Assert.AreEqual(FDetector.Config.MinStdDev, FDetector.StdDev);
@@ -461,7 +468,8 @@ begin
   Data[0] := 2; Data[1] := 4; Data[2] := 6; Data[3] := 8; Data[4] := 10;
   // Mean should be 6, StdDev should be sqrt(10) ≈ 3.162
 
-  FDetector.LearnFromHistoricalData(Data);
+  FDetector.AddValues(Data);
+  FDetector.Build;
 
   Assert.IsTrue(AreFloatsEqual(6.0, FDetector.Mean), 'Mean calculation error');
   Assert.IsTrue(AreFloatsEqual(Sqrt(10), FDetector.StdDev, 0.001), 'StdDev calculation error');
@@ -1537,10 +1545,10 @@ end;
 
 procedure TIntegrationTests.TestFactoryPatternRefactored;
 var
-  WebTrafficDetector: TBaseAnomalyDetector;
-  FinancialDetector: TBaseAnomalyDetector;
-  IoTDetector: TBaseAnomalyDetector;
-  IsolationDetector: TBaseAnomalyDetector;
+  WebTrafficDetector: IStatisticalAnomalyDetector;
+  FinancialDetector: IStatisticalAnomalyDetector;
+  IoTDetector: IStatisticalAnomalyDetector;
+  IsolationDetector: IDensityAnomalyDetector;
   Dataset: TArray<TArray<Double>>;
   i: Integer;
   Result: TAnomalyResult;
@@ -1551,70 +1559,57 @@ begin
   IoTDetector := TAnomalyDetectorFactory.CreateForIoTSensors;
   IsolationDetector := TAnomalyDetectorFactory.CreateForHighDimensionalData;
 
-  try
-    // Test Web Traffic detector (should be SlidingWindow)
-    Assert.IsTrue(WebTrafficDetector is TSlidingWindowDetector, 'Web traffic should use sliding window');
-    for i := 1 to 50 do
-      TSlidingWindowDetector(WebTrafficDetector).AddValue(1000 + Random(200) - 100);
+  // Test Web Traffic detector (Sliding Window)
+  for i := 1 to 50 do
+    WebTrafficDetector.AddValue(1000 + Random(200) - 100);
 
-    Result := WebTrafficDetector.Detect(5000); // DDoS spike
-    Assert.IsTrue(Result.IsAnomaly, 'Web traffic detector should detect DDoS');
+  Result := WebTrafficDetector.Detect(5000); // DDoS spike
+  Assert.IsTrue(Result.IsAnomaly, 'Web traffic detector should detect DDoS');
 
-    // Test Financial detector (should be EMA)
-    Assert.IsTrue(FinancialDetector is TEMAAnomalyDetector, 'Financial should use EMA');
-    for i := 1 to 30 do
-      TEMAAnomalyDetector(FinancialDetector).AddValue(100 + Random(10) - 5);
+  // Test Financial detector (EMA)
+  for i := 1 to 30 do
+    FinancialDetector.AddValue(100 + Random(10) - 5);
 
-    Result := FinancialDetector.Detect(150); // Price spike
-    Assert.IsTrue(Result.IsAnomaly, 'Financial detector should detect price spike');
+  Result := FinancialDetector.Detect(150); // Price spike
+  Assert.IsTrue(Result.IsAnomaly, 'Financial detector should detect price spike');
 
-    // Test IoT detector (should be Adaptive)
-    Assert.IsTrue(IoTDetector is TAdaptiveAnomalyDetector, 'IoT should use adaptive');
+  // Test IoT detector (Adaptive)
+  // Initialize with normal sensor readings
+  var BaselineData: TArray<Double>;
+  SetLength(BaselineData, 20);
+  for i := 0 to 19 do
+    BaselineData[i] := 25 + Random(10) - 5; // Temp readings
 
-    // Initialize with normal sensor readings
-    var BaselineData: TArray<Double>;
-    SetLength(BaselineData, 20);
-    for i := 0 to 19 do
-      BaselineData[i] := 25 + Random(10) - 5; // Temp readings
+  IoTDetector.AddValues(BaselineData);
+  IoTDetector.Build;
 
-    TAdaptiveAnomalyDetector(IoTDetector).InitializeWithNormalData(BaselineData);
+  Result := IoTDetector.Detect(60); // Overheating
+  Assert.IsTrue(Result.IsAnomaly, 'IoT detector should detect overheating');
 
-    Result := IoTDetector.Detect(60); // Overheating
-    Assert.IsTrue(Result.IsAnomaly, 'IoT detector should detect overheating');
-
-    // Test Isolation Forest (should handle multi-dimensional)
-    Assert.IsTrue(IsolationDetector is TIsolationForestDetector, 'HD should use Isolation Forest');
-
-    // Create multi-dimensional dataset
-    SetLength(Dataset, 200);
-    for i := 0 to 199 do
-    begin
-      SetLength(Dataset[i], 3);
-      Dataset[i][0] := 100 + Random(20) - 10;
-      Dataset[i][1] := 50 + Random(16) - 8;
-      Dataset[i][2] := 25 + Random(10) - 5;
-    end;
-
-    TIsolationForestDetector(IsolationDetector).TrainFromDataset(Dataset);
-
-    var Instance: TArray<Double>;
-    SetLength(Instance, 3);
-    Instance := [300, 300, 300]; // Clear anomaly
-    Result := TIsolationForestDetector(IsolationDetector).DetectMultiDimensional(Instance);
-    Assert.IsTrue(Result.IsAnomaly, 'Isolation Forest should detect multi-dim anomaly');
-
-    // Verify all detectors are properly initialized
-    Assert.IsTrue(WebTrafficDetector.IsInitialized, 'Web traffic detector should be ready');
-    Assert.IsTrue(FinancialDetector.IsInitialized, 'Financial detector should be ready');
-    Assert.IsTrue(IoTDetector.IsInitialized, 'IoT detector should be ready');
-    Assert.IsTrue(IsolationDetector.IsInitialized, 'Isolation detector should be ready');
-
-  finally
-    IsolationDetector.Free;
-    IoTDetector.Free;
-    FinancialDetector.Free;
-    WebTrafficDetector.Free;
+  // Test Isolation Forest (multi-dimensional)
+  // Create multi-dimensional dataset
+  SetLength(Dataset, 200);
+  for i := 0 to 199 do
+  begin
+    SetLength(Dataset[i], 3);
+    Dataset[i][0] := 100 + Random(20) - 10;
+    Dataset[i][1] := 50 + Random(16) - 8;
+    Dataset[i][2] := 25 + Random(10) - 5;
+    IsolationDetector.AddTrainingData(Dataset[i]);
   end;
+  IsolationDetector.Train;
+
+  var Instance: TArray<Double>;
+  SetLength(Instance, 3);
+  Instance := [300, 300, 300]; // Clear anomaly
+  Result := IsolationDetector.DetectMultiDimensional(Instance);
+  Assert.IsTrue(Result.IsAnomaly, 'Isolation Forest should detect multi-dim anomaly');
+
+  // Verify all detectors are properly initialized
+  Assert.IsTrue(WebTrafficDetector.IsInitialized, 'Web traffic detector should be ready');
+  Assert.IsTrue(FinancialDetector.IsInitialized, 'Financial detector should be ready');
+  Assert.IsTrue(IoTDetector.IsInitialized, 'IoT detector should be ready');
+  Assert.IsTrue(IsolationDetector.IsInitialized, 'Isolation detector should be ready');
 end;
 
 { TDBSCANDetectorTests }

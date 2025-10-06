@@ -18,9 +18,79 @@ uses
 
 type
   /// <summary>
+  /// Base interface for all anomaly detectors
+  /// </summary>
+  IAnomalyDetector = interface
+    ['{D7F8E9A1-4B2C-4D3E-8F9A-1B2C3D4E5F6A}']
+    // Training phase
+    procedure AddValue(const AValue: Double);
+    procedure AddValues(const AValues: TArray<Double>);
+    procedure Build;
+
+    // Detection phase
+    function Detect(const AValue: Double): TAnomalyResult;
+    function IsAnomaly(const AValue: Double): Boolean;
+    function GetAnomalyInfo(const AValue: Double): string;
+
+    // Persistence
+    procedure SaveState(const AStream: TStream);
+    procedure LoadState(const AStream: TStream);
+    procedure SaveToFile(const AFileName: string);
+    procedure LoadFromFile(const AFileName: string);
+
+    // Utilities
+    function GetPerformanceReport: string;
+    function IsInitialized: Boolean;
+
+    // Properties
+    function GetName: string;
+    function GetConfig: TAnomalyDetectionConfig;
+    procedure SetConfig(const AConfig: TAnomalyDetectionConfig);
+    function GetOnAnomalyDetected: TAnomalyDetectedEvent;
+    procedure SetOnAnomalyDetected(const AEvent: TAnomalyDetectedEvent);
+    function GetPerformanceMonitor: TDetectorPerformanceMonitor;
+
+    property Name: string read GetName;
+    property Config: TAnomalyDetectionConfig read GetConfig write SetConfig;
+    property OnAnomalyDetected: TAnomalyDetectedEvent read GetOnAnomalyDetected write SetOnAnomalyDetected;
+    property PerformanceMonitor: TDetectorPerformanceMonitor read GetPerformanceMonitor;
+  end;
+
+  /// <summary>
+  /// Interface for statistical anomaly detectors
+  /// Extends base interface with statistical properties
+  /// </summary>
+  IStatisticalAnomalyDetector = interface(IAnomalyDetector)
+    ['{0B3CAE45-6428-4E31-9A22-611C8D269A16}']
+    function GetMean: Double;
+    function GetStdDev: Double;
+    function GetLowerLimit: Double;
+    function GetUpperLimit: Double;
+
+    property Mean: Double read GetMean;
+    property StdDev: Double read GetStdDev;
+    property LowerLimit: Double read GetLowerLimit;
+    property UpperLimit: Double read GetUpperLimit;
+  end;
+
+  /// <summary>
+  /// Interface for density-based anomaly detectors
+  /// Extends base interface with multi-dimensional support
+  /// </summary>
+  IDensityAnomalyDetector = interface(IAnomalyDetector)
+    ['{E63A0189-D7B3-4DC3-BFE2-C80815F30762}']
+    procedure AddTrainingData(const AInstance: TArray<Double>);
+    procedure Train;
+    function DetectMultiDimensional(const AInstance: TArray<Double>): TAnomalyResult;
+
+    function GetDimensions: Integer;
+    property Dimensions: Integer read GetDimensions;
+  end;
+
+  /// <summary>
   /// Base class for all anomaly detection algorithms
   /// </summary>
-  TBaseAnomalyDetector = class
+  TBaseAnomalyDetector = class(TInterfacedObject, IAnomalyDetector)
   protected
     FName: string;
     FConfig: TAnomalyDetectionConfig;
@@ -31,19 +101,41 @@ type
     procedure SaveConfigToStream(const AStream: TStream);
     procedure LoadConfigFromStream(const AStream: TStream);
     procedure NotifyAnomalyEvent(const AEventType: TAnomalyEvent; const AResult: TAnomalyResult);
+
+    // Interface implementation
+    function GetName: string;
+    function GetConfig: TAnomalyDetectionConfig;
+    procedure SetConfig(const AConfig: TAnomalyDetectionConfig);
+    function GetOnAnomalyDetected: TAnomalyDetectedEvent;
+    procedure SetOnAnomalyDetected(const AEvent: TAnomalyDetectedEvent);
+    function GetPerformanceMonitor: TDetectorPerformanceMonitor;
   public
     constructor Create(const AName: string); overload;
     constructor Create(const AName: string; const AConfig: TAnomalyDetectionConfig); overload;
     destructor Destroy; override;
+
+    // Training phase - unified interface for all detectors
+    procedure AddValue(const AValue: Double); virtual;
+    procedure AddValues(const AValues: TArray<Double>); virtual;
+
+    // Build/finalize phase - prepare detector for use
+    procedure Build; virtual;
+
+    // Detection phase
     function Detect(const AValue: Double): TAnomalyResult; virtual; abstract;
     function IsAnomaly(const AValue: Double): Boolean; virtual;
     function GetAnomalyInfo(const AValue: Double): string; virtual;
+
+    // Persistence
     procedure SaveState(const AStream: TStream); virtual; abstract;
     procedure LoadState(const AStream: TStream); virtual; abstract;
     procedure SaveToFile(const AFileName: string);
     procedure LoadFromFile(const AFileName: string);
+
+    // Utilities
     function GetPerformanceReport: string;
     function IsInitialized: Boolean; virtual; abstract;
+
     property Name: string read FName;
     property Config: TAnomalyDetectionConfig read FConfig write FConfig;
     property OnAnomalyDetected: TAnomalyDetectedEvent read FOnAnomalyDetected write FOnAnomalyDetected;
@@ -146,6 +238,59 @@ begin
   finally
     FileStream.Free;
   end;
+end;
+
+procedure TBaseAnomalyDetector.AddValue(const AValue: Double);
+begin
+  // Default implementation: do nothing
+  // Detectors that support incremental training should override this
+end;
+
+procedure TBaseAnomalyDetector.AddValues(const AValues: TArray<Double>);
+var
+  Value: Double;
+begin
+  // Default implementation: call AddValue for each value
+  for Value in AValues do
+    AddValue(Value);
+end;
+
+procedure TBaseAnomalyDetector.Build;
+begin
+  // Default implementation: do nothing
+  // Detectors that require explicit build step should override this
+end;
+
+// Interface implementation methods
+
+function TBaseAnomalyDetector.GetName: string;
+begin
+  Result := FName;
+end;
+
+function TBaseAnomalyDetector.GetConfig: TAnomalyDetectionConfig;
+begin
+  Result := FConfig;
+end;
+
+procedure TBaseAnomalyDetector.SetConfig(const AConfig: TAnomalyDetectionConfig);
+begin
+  FConfig := AConfig;
+end;
+
+function TBaseAnomalyDetector.GetOnAnomalyDetected: TAnomalyDetectedEvent;
+begin
+  Result := FOnAnomalyDetected;
+end;
+
+procedure TBaseAnomalyDetector.SetOnAnomalyDetected(const AEvent: TAnomalyDetectedEvent);
+begin
+  FOnAnomalyDetected := AEvent;
+end;
+
+function TBaseAnomalyDetector.GetPerformanceMonitor: TDetectorPerformanceMonitor;
+begin
+  Result := FPerformanceMonitor;
 end;
 
 end.

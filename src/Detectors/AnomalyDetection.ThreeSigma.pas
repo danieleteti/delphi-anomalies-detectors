@@ -13,6 +13,7 @@ interface
 
 uses
   System.SysUtils, System.Classes, System.Math, System.SyncObjs,
+  System.Generics.Collections,
   AnomalyDetection.Types,
   AnomalyDetection.Base;
 
@@ -21,27 +22,41 @@ type
   /// Traditional 3-Sigma rule based on historical data
   /// Best for: Historical data analysis, static datasets, batch processing
   /// </summary>
-  TThreeSigmaDetector = class(TBaseAnomalyDetector)
+  TThreeSigmaDetector = class(TBaseAnomalyDetector, IStatisticalAnomalyDetector)
   private
-    FData: TArray<Double>;
+    FData: TList<Double>;
     FMean: Double;
     FStdDev: Double;
     FLowerLimit: Double;
     FUpperLimit: Double;
     FIsCalculated: Boolean;
     procedure CalculateLimits;
+    procedure InternalCalculateStatistics;
+
+    // Interface implementation
+    function GetMean: Double;
+    function GetStdDev: Double;
+    function GetLowerLimit: Double;
+    function GetUpperLimit: Double;
   protected
     procedure CheckAndNotifyAnomaly(const AResult: TAnomalyResult);
   public
     constructor Create; overload;
     constructor Create(const AConfig: TAnomalyDetectionConfig); overload;
-    procedure SetHistoricalData(const AData: TArray<Double>);
-    procedure LearnFromHistoricalData(const AData: TArray<Double>);
-    procedure CalculateStatistics;
+    destructor Destroy; override;
+
+    // Training phase - add data incrementally
+    procedure AddValue(const AValue: Double); override;
+    procedure AddValues(const AValues: TArray<Double>); override;
+
+    // Build/finalize phase - calculate statistics from accumulated data
+    procedure Build; override;
+
     function Detect(const AValue: Double): TAnomalyResult; override;
     procedure SaveState(const AStream: TStream); override;
     procedure LoadState(const AStream: TStream); override;
     function IsInitialized: Boolean; override;
+
     property Mean: Double read FMean;
     property StdDev: Double read FStdDev;
     property LowerLimit: Double read FLowerLimit;
@@ -55,75 +70,97 @@ implementation
 constructor TThreeSigmaDetector.Create;
 begin
   inherited Create('3-Sigma Detector');
+  FData := TList<Double>.Create;
   FIsCalculated := False;
 end;
 
 constructor TThreeSigmaDetector.Create(const AConfig: TAnomalyDetectionConfig);
 begin
   inherited Create('3-Sigma Detector', AConfig);
+  FData := TList<Double>.Create;
   FIsCalculated := False;
 end;
 
-procedure TThreeSigmaDetector.SetHistoricalData(const AData: TArray<Double>);
+destructor TThreeSigmaDetector.Destroy;
+begin
+  FData.Free;
+  inherited;
+end;
+
+procedure TThreeSigmaDetector.AddValue(const AValue: Double);
 begin
   FLock.Enter;
   try
-    FData := AData;
+    if IsNaN(AValue) or IsInfinite(AValue) then
+      raise EAnomalyDetectionException.CreateFmt('Invalid value: %g', [AValue]);
+
+    FData.Add(AValue);
+    FIsCalculated := False; // Mark as needing rebuild
+  finally
+    FLock.Leave;
+  end;
+end;
+
+procedure TThreeSigmaDetector.AddValues(const AValues: TArray<Double>);
+var
+  Value: Double;
+begin
+  FLock.Enter;
+  try
+    for Value in AValues do
+    begin
+      if IsNaN(Value) or IsInfinite(Value) then
+        raise EAnomalyDetectionException.CreateFmt('Invalid value: %g', [Value]);
+      FData.Add(Value);
+    end;
     FIsCalculated := False;
   finally
     FLock.Leave;
   end;
 end;
 
-procedure TThreeSigmaDetector.LearnFromHistoricalData(const AData: TArray<Double>);
+procedure TThreeSigmaDetector.Build;
 begin
-  SetHistoricalData(AData);
-  CalculateStatistics;
+  FLock.Enter;
+  try
+    InternalCalculateStatistics;
+  finally
+    FLock.Leave;
+  end;
 end;
 
-procedure TThreeSigmaDetector.CalculateStatistics;
+procedure TThreeSigmaDetector.InternalCalculateStatistics;
 var
   i: Integer;
   Sum: Double;
   N: Integer;
 begin
-  FLock.Enter;
-  try
-    N := Length(FData);
-    if N = 0 then
-      raise EAnomalyDetectionException.Create('No historical data available');
+  // Note: Lock already acquired by caller (Build method)
+  N := FData.Count;
+  if N = 0 then
+    raise EAnomalyDetectionException.Create('No historical data available. Call AddValue() or AddValues() first.');
 
-    if N = 1 then
-      raise EAnomalyDetectionException.Create('At least 2 data points required for standard deviation');
+  if N = 1 then
+    raise EAnomalyDetectionException.Create('At least 2 data points required for standard deviation');
 
-    // Validate NaN/Inf values
-    for i := 0 to High(FData) do
-    begin
-      if IsNaN(FData[i]) or IsInfinite(FData[i]) then
-        raise EAnomalyDetectionException.CreateFmt('Invalid data value at index %d: %g', [i, FData[i]]);
-    end;
+  // Calculate mean
+  Sum := 0;
+  for i := 0 to N - 1 do
+    Sum := Sum + FData[i];
+  FMean := Sum / N;
 
-    // Calculate mean
-    Sum := 0;
-    for i := 0 to High(FData) do
-      Sum := Sum + FData[i];
-    FMean := Sum / N;
+  // Calculate standard deviation (sample formula)
+  Sum := 0;
+  for i := 0 to N - 1 do
+    Sum := Sum + Power(FData[i] - FMean, 2);
+  FStdDev := Sqrt(Sum / (N - 1));
 
-    // Calculate standard deviation (sample formula)
-    Sum := 0;
-    for i := 0 to High(FData) do
-      Sum := Sum + Power(FData[i] - FMean, 2);
-    FStdDev := Sqrt(Sum / (N - 1));
+  // Ensure minimum standard deviation
+  if FStdDev < FConfig.MinStdDev then
+    FStdDev := FConfig.MinStdDev;
 
-    // Ensure minimum standard deviation
-    if FStdDev < FConfig.MinStdDev then
-      FStdDev := FConfig.MinStdDev;
-
-    CalculateLimits;
-    FIsCalculated := True;
-  finally
-    FLock.Leave;
-  end;
+  CalculateLimits;
+  FIsCalculated := True;
 end;
 
 procedure TThreeSigmaDetector.CalculateLimits;
@@ -160,7 +197,7 @@ begin
   FLock.Enter;
   try
     if not FIsCalculated then
-      raise EAnomalyDetectionException.Create('Statistics not calculated. Call CalculateStatistics first.');
+      raise EAnomalyDetectionException.Create('Statistics not calculated. Call Build() first.');
 
     Result.Value := AValue;
     Result.LowerLimit := FLowerLimit;
@@ -209,7 +246,7 @@ begin
     AStream.WriteData(FUpperLimit);
 
     // Save historical data
-    DataCount := Length(FData);
+    DataCount := FData.Count;
     AStream.WriteData(DataCount);
     for i := 0 to DataCount - 1 do
       AStream.WriteData(FData[i]);
@@ -222,6 +259,7 @@ procedure TThreeSigmaDetector.LoadState(const AStream: TStream);
 var
   DataCount: Integer;
   i: Integer;
+  Value: Double;
 begin
   FLock.Enter;
   try
@@ -237,12 +275,38 @@ begin
 
     // Load historical data
     AStream.ReadData(DataCount);
-    SetLength(FData, DataCount);
+    FData.Clear;
+    FData.Capacity := DataCount;
     for i := 0 to DataCount - 1 do
-      AStream.ReadData(FData[i]);
+    begin
+      AStream.ReadData(Value);
+      FData.Add(Value);
+    end;
   finally
     FLock.Leave;
   end;
+end;
+
+// IStatisticalAnomalyDetector interface implementation
+
+function TThreeSigmaDetector.GetMean: Double;
+begin
+  Result := FMean;
+end;
+
+function TThreeSigmaDetector.GetStdDev: Double;
+begin
+  Result := FStdDev;
+end;
+
+function TThreeSigmaDetector.GetLowerLimit: Double;
+begin
+  Result := FLowerLimit;
+end;
+
+function TThreeSigmaDetector.GetUpperLimit: Double;
+begin
+  Result := FUpperLimit;
 end;
 
 end.

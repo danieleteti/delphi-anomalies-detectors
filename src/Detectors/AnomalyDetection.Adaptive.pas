@@ -13,6 +13,7 @@ interface
 
 uses
   System.SysUtils, System.Classes, System.Math, System.SyncObjs,
+  System.Generics.Collections,
   AnomalyDetection.Types,
   AnomalyDetection.Base;
 
@@ -21,7 +22,7 @@ type
   /// Adaptive detector that learns from confirmed normal values
   /// Best for: Learning systems, evolving patterns, feedback-driven
   /// </summary>
-  TAdaptiveAnomalyDetector = class(TBaseAnomalyDetector)
+  TAdaptiveAnomalyDetector = class(TBaseAnomalyDetector, IStatisticalAnomalyDetector)
   private
     FWindowSize: Integer;
     FMean: Double;
@@ -30,12 +31,28 @@ type
     FAdaptationRate: Double;
     FInitialized: Boolean;
     FSampleCount: Integer;
+    FLowerLimit: Double;
+    FUpperLimit: Double;
+    FTrainingData: TList<Double>;
     procedure CalculateLimits;
+
+    // Interface implementation
+    function GetMean: Double;
+    function GetStdDev: Double;
+    function GetLowerLimit: Double;
+    function GetUpperLimit: Double;
   protected
     procedure CheckAndNotifyAnomaly(const AResult: TAnomalyResult);
   public
     constructor Create(AWindowSize: Integer = 1000; AAdaptationRate: Double = 0.01); overload;
     constructor Create(AWindowSize: Integer; AAdaptationRate: Double; const AConfig: TAnomalyDetectionConfig); overload;
+    destructor Destroy; override;
+
+    // Training phase - override base class methods
+    procedure AddValue(const AValue: Double); override;
+    procedure AddValues(const AValues: TArray<Double>); override;
+    procedure Build; override;
+
     procedure ProcessValue(const AValue: Double);
     procedure UpdateNormal(const AValue: Double);
     procedure InitializeWithNormalData(const ANormalData: TArray<Double>);
@@ -65,6 +82,52 @@ begin
   FAdaptationRate := AAdaptationRate;
   FInitialized := False;
   FSampleCount := 0;
+  FTrainingData := TList<Double>.Create;
+end;
+
+destructor TAdaptiveAnomalyDetector.Destroy;
+begin
+  FTrainingData.Free;
+  inherited;
+end;
+
+procedure TAdaptiveAnomalyDetector.AddValue(const AValue: Double);
+begin
+  FLock.Enter;
+  try
+    FTrainingData.Add(AValue);
+  finally
+    FLock.Leave;
+  end;
+end;
+
+procedure TAdaptiveAnomalyDetector.AddValues(const AValues: TArray<Double>);
+var
+  Value: Double;
+begin
+  for Value in AValues do
+    AddValue(Value);
+end;
+
+procedure TAdaptiveAnomalyDetector.Build;
+var
+  DataArray: TArray<Double>;
+  i: Integer;
+begin
+  FLock.Enter;
+  try
+    if FTrainingData.Count = 0 then
+      Exit;
+
+    SetLength(DataArray, FTrainingData.Count);
+    for i := 0 to FTrainingData.Count - 1 do
+      DataArray[i] := FTrainingData[i];
+
+    InitializeWithNormalData(DataArray);
+    FTrainingData.Clear; // Clear training data after initialization
+  finally
+    FLock.Leave;
+  end;
 end;
 
 procedure TAdaptiveAnomalyDetector.ProcessValue(const AValue: Double);
@@ -190,8 +253,12 @@ begin
 end;
 
 procedure TAdaptiveAnomalyDetector.CalculateLimits;
+var
+  Threshold: Double;
 begin
-  // Dynamic limits calculated in Detect
+  Threshold := FConfig.SigmaMultiplier * FStdDev;
+  FLowerLimit := FMean - Threshold;
+  FUpperLimit := FMean + Threshold;
 end;
 
 procedure TAdaptiveAnomalyDetector.CheckAndNotifyAnomaly(const AResult: TAnomalyResult);
@@ -288,6 +355,28 @@ begin
   finally
     FLock.Leave;
   end;
+end;
+
+// IStatisticalAnomalyDetector interface implementation
+
+function TAdaptiveAnomalyDetector.GetMean: Double;
+begin
+  Result := FMean;
+end;
+
+function TAdaptiveAnomalyDetector.GetStdDev: Double;
+begin
+  Result := FStdDev;
+end;
+
+function TAdaptiveAnomalyDetector.GetLowerLimit: Double;
+begin
+  Result := FLowerLimit;
+end;
+
+function TAdaptiveAnomalyDetector.GetUpperLimit: Double;
+begin
+  Result := FUpperLimit;
 end;
 
 end.

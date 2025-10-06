@@ -178,6 +178,84 @@ MLDetector := TAnomalyDetectorFactory.CreateForHighDimensionalData;
    uses AnomalyDetectionAlgorithms;
    ```
 
+## Utility Functions
+
+The library includes statistical utility functions in `AnomalyDetection.Utils` for data preprocessing:
+
+### Cleaning Data with Percentiles
+
+When your historical data might contain anomalies (errors, fraud, bugs), use percentile-based filtering before training:
+
+```pascal
+uses
+  AnomalyDetection.Utils,
+  AnomalyDetection.ThreeSigma;
+
+var
+  RawData: TArray<Double>;
+  CleaningResult: TCleaningResult;
+  Detector: TThreeSigmaDetector;
+begin
+  // Load data from database (may contain outliers)
+  RawData := LoadHistoricalOrders;
+
+  // Clean data using 5th-95th percentile range (removes top/bottom 5%)
+  CleaningResult := CleanDataWithPercentiles(RawData, 5, 95);
+
+  WriteLn(Format('Removed %d outliers (%.1f%%)',
+         [CleaningResult.RemovedCount, CleaningResult.RemovalPercent]));
+
+  // Train detector on clean data only
+  Detector := TThreeSigmaDetector.Create;
+  try
+    Detector.SetHistoricalData(CleaningResult.CleanData);
+    Detector.CalculateStatistics;
+  finally
+    Detector.Free;
+  end;
+end;
+```
+
+**Alternative: IQR Method**
+```pascal
+// Remove outliers using Interquartile Range (IQR) method
+CleaningResult := CleanDataWithIQR(RawData, 1.5); // Standard multiplier
+```
+
+### Statistical Analysis
+
+```pascal
+var
+  Stats: TStatisticalSummary;
+begin
+  Stats := CalculateStatistics(Data);
+
+  WriteLn('Count: ', Stats.Count);
+  WriteLn('Mean: ', Stats.Mean:0:2);
+  WriteLn('Median: ', Stats.Median:0:2);
+  WriteLn('StdDev: ', Stats.StdDev:0:2);
+  WriteLn('Min/Max: ', Stats.Min:0:2, ' / ', Stats.Max:0:2);
+  WriteLn('Q1/Q3: ', Stats.Q1:0:2, ' / ', Stats.Q3:0:2);
+  WriteLn('IQR: ', Stats.IQR:0:2);
+end;
+```
+
+**Available utility functions**:
+- `CalculatePercentile(Data, Percentile)` - Get specific percentile value
+- `CleanDataWithPercentiles(Data, Lower, Upper)` - Remove outliers using percentiles
+- `CleanDataWithIQR(Data, Multiplier)` - Remove outliers using IQR method
+- `CalculateStatistics(Data)` - Get full statistical summary
+- `CalculateMean(Data)` - Calculate average
+- `CalculateMedian(Data)` - Calculate median (50th percentile)
+- `CalculateStdDev(Data)` - Calculate standard deviation
+- `FindMin(Data)` / `FindMax(Data)` - Find min/max values
+
+**When to use data cleaning**:
+- ✅ **Required** for ThreeSigma, SlidingWindow, EMA if data may contain anomalies
+- ✅ **Recommended** when loading historical data from production databases
+- ❌ **Not needed** for Isolation Forest (already robust to outliers)
+- ❌ **Skip** if data is pre-validated or synthetic/test data
+
 ## Quick Start Examples
 
 ### Basic Usage - Three Sigma Detector
@@ -189,11 +267,13 @@ var
 begin
   Detector := TThreeSigmaDetector.Create;
   try
-    // Set historical data
+    // Add historical data
     Data := [100, 105, 98, 102, 107, 99, 103, 101, 104, 106];
-    Detector.SetHistoricalData(Data);
-    Detector.CalculateStatistics;
-    
+    Detector.AddValues(Data);
+
+    // Build the statistical model
+    Detector.Build;
+
     // Check for anomalies with detailed results
     Result := Detector.Detect(150);
     if Result.IsAnomaly then
@@ -202,6 +282,15 @@ begin
     Detector.Free;
   end;
 end;
+```
+
+**Incremental approach:**
+```pascal
+// Add data incrementally, then build
+for Value in HistoricalData do
+  Detector.AddValue(Value);
+
+Detector.Build;  // Calculate statistics when ready
 ```
 
 ### Real-time Monitoring - Sliding Window
@@ -445,9 +534,35 @@ Use **Anomaly Confirmation System** when:
 - Multiple detection sources are available
 - You need high confidence in alerts
 
-## Running the Demo
+## Running the Demos
 
-### Basic Demo
+### Sample Demos (Console Applications)
+
+All sample applications are located in the `Samples/` directory and demonstrate specific use cases:
+
+```bash
+# Data Entry Validation (3 separate demos)
+Samples\DataEntrySample\InvoiceValidationDemo.exe    # Invoice amounts per supplier
+Samples\DataEntrySample\OrderValidationDemo.exe      # Multi-dimensional fraud detection
+Samples\DataEntrySample\TimesheetValidationDemo.exe  # Employee hours with learning
+
+# Three Sigma - Data center temperature monitoring
+Samples\ThreeSigmaDetectorSample\ThreeSigmaExample.exe
+
+# Sliding Window - Real-time web traffic monitoring
+Samples\SlidingWindowSample\SlidingWindowExample.exe
+
+# EMA - Financial markets monitoring
+Samples\EMASample\EMASample.exe
+
+# Adaptive - Server CPU monitoring with learning
+Samples\AdaptiveDetectorSample\AdaptiveSample.exe
+
+# DBSCAN - Network intrusion detection
+Samples\DBSCANSample\DBSCANExample.exe
+```
+
+### Main Interactive Demo
 ```bash
 AnomalyDetectionDemo.exe
 ```
@@ -613,6 +728,552 @@ end;
 - **Security**: Intrusion detection with Isolation Forest
 - **Capacity Planning**: Resource usage trends with Adaptive Detector
 - **SLA Monitoring**: Response time anomalies with Confirmation System
+
+## Data Entry Validation Examples
+
+The library can be effectively used to detect anomalies during data entry operations, helping prevent user errors and identify suspicious input patterns.
+
+### Example 1: Invoice Amount Validation
+
+Detect unusual invoice amounts based on historical data for a specific supplier:
+
+```pascal
+type
+  TInvoiceValidator = class
+  private
+    FDetectors: TDictionary<string, TSlidingWindowDetector>;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    function ValidateInvoiceAmount(const ASupplierCode: string;
+                                   AAmount: Double;
+                                   out AWarning: string): Boolean;
+  end;
+
+constructor TInvoiceValidator.Create;
+begin
+  inherited;
+  FDetectors := TDictionary<string, TSlidingWindowDetector>.Create;
+end;
+
+destructor TInvoiceValidator.Destroy;
+var
+  Detector: TSlidingWindowDetector;
+begin
+  for Detector in FDetectors.Values do
+    Detector.Free;
+  FDetectors.Free;
+  inherited;
+end;
+
+function TInvoiceValidator.ValidateInvoiceAmount(const ASupplierCode: string;
+                                                  AAmount: Double;
+                                                  out AWarning: string): Boolean;
+var
+  Detector: TSlidingWindowDetector;
+  AnomalyResult: TAnomalyResult;
+begin
+  // Get or create detector for this supplier
+  if not FDetectors.TryGetValue(ASupplierCode, Detector) then
+  begin
+    Detector := TSlidingWindowDetector.Create(50); // Track last 50 invoices
+    FDetectors.Add(ASupplierCode, Detector);
+  end;
+
+  // Check for anomaly
+  AnomalyResult := Detector.Detect(AAmount);
+
+  if AnomalyResult.IsAnomaly then
+  begin
+    AWarning := Format('Unusual amount for supplier %s: %.2f € ' +
+                       '(Expected range: %.2f - %.2f €, Z-score: %.2f)',
+                       [ASupplierCode, AAmount,
+                        AnomalyResult.LowerLimit, AnomalyResult.UpperLimit,
+                        AnomalyResult.ZScore]);
+    Result := False; // Requires verification
+  end
+  else
+  begin
+    AWarning := '';
+    Result := True; // Normal amount
+  end;
+
+  // Add to history for learning
+  Detector.AddValue(AAmount);
+end;
+
+// Usage in data entry form
+procedure TInvoiceEntryForm.ValidateInvoiceClick(Sender: TObject);
+var
+  SupplierCode: string;
+  Amount: Double;
+  Warning: string;
+begin
+  SupplierCode := edtSupplierCode.Text;
+  Amount := StrToFloat(edtAmount.Text);
+
+  if not FValidator.ValidateInvoiceAmount(SupplierCode, Amount, Warning) then
+  begin
+    // Show warning to user
+    if MessageDlg('Anomaly Detected',
+                  Warning + #13#10#13#10 + 'Do you want to proceed anyway?',
+                  mtWarning, [mbYes, mbNo], 0) = mrNo then
+      Exit;
+  end;
+
+  // Save invoice...
+end;
+```
+
+### Example 2: Multi-Field Order Validation
+
+Validate order patterns using multiple fields (amount, quantity, discount) with Isolation Forest:
+
+```pascal
+type
+  TOrderValidator = class
+  private
+    FDetector: TIsolationForestDetector;
+    FIsTraining: Boolean;
+    FTrainingCount: Integer;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    procedure AddTrainingOrder(AAmount, AQuantity, ADiscount: Double);
+    procedure FinishTraining;
+    function ValidateOrder(AAmount, AQuantity, ADiscount: Double;
+                          out ASuspicionLevel: string): Boolean;
+  end;
+
+constructor TOrderValidator.Create;
+begin
+  inherited;
+  // 3 dimensions: Amount, Quantity, Discount%
+  FDetector := TIsolationForestDetector.Create(100, 256, 3);
+  FIsTraining := True;
+  FTrainingCount := 0;
+end;
+
+destructor TOrderValidator.Destroy;
+begin
+  FDetector.Free;
+  inherited;
+end;
+
+procedure TOrderValidator.AddTrainingOrder(AAmount, AQuantity, ADiscount: Double);
+begin
+  if FIsTraining then
+  begin
+    FDetector.AddTrainingData([AAmount, AQuantity, ADiscount]);
+    Inc(FTrainingCount);
+
+    // Auto-train after 1000 samples
+    if FTrainingCount >= 1000 then
+      FinishTraining;
+  end;
+end;
+
+procedure TOrderValidator.FinishTraining;
+begin
+  if FIsTraining and (FTrainingCount > 0) then
+  begin
+    FDetector.Train;
+    FIsTraining := False;
+  end;
+end;
+
+function TOrderValidator.ValidateOrder(AAmount, AQuantity, ADiscount: Double;
+                                       out ASuspicionLevel: string): Boolean;
+var
+  AnomalyResult: TAnomalyResult;
+  OrderData: TArray<Double>;
+begin
+  if FIsTraining then
+  begin
+    ASuspicionLevel := 'System still learning (collecting data)';
+    Result := True; // Allow during training
+    AddTrainingOrder(AAmount, AQuantity, ADiscount);
+    Exit;
+  end;
+
+  OrderData := [AAmount, AQuantity, ADiscount];
+  AnomalyResult := FDetector.DetectMultiDimensional(OrderData);
+
+  if AnomalyResult.IsAnomaly then
+  begin
+    // Classify suspicion level based on anomaly score
+    if AnomalyResult.ZScore > 2.0 then
+      ASuspicionLevel := 'HIGH - Highly unusual order pattern detected'
+    else if AnomalyResult.ZScore > 1.0 then
+      ASuspicionLevel := 'MEDIUM - Uncommon order combination'
+    else
+      ASuspicionLevel := 'LOW - Slightly unusual order';
+
+    Result := False;
+  end
+  else
+  begin
+    ASuspicionLevel := 'Normal order pattern';
+    Result := True;
+  end;
+end;
+
+// Usage in order entry form
+procedure TOrderEntryForm.btnValidateClick(Sender: TObject);
+var
+  Amount, Quantity, Discount: Double;
+  SuspicionLevel: string;
+begin
+  Amount := StrToFloat(edtAmount.Text);
+  Quantity := StrToFloat(edtQuantity.Text);
+  Discount := StrToFloat(edtDiscount.Text);
+
+  if not FOrderValidator.ValidateOrder(Amount, Quantity, Discount, SuspicionLevel) then
+  begin
+    // Show alert panel
+    pnlWarning.Visible := True;
+    lblWarning.Caption := 'ANOMALY DETECTED: ' + SuspicionLevel;
+    lblWarning.Font.Color := clRed;
+
+    // Log for audit
+    LogAnomalousOrder(Amount, Quantity, Discount, SuspicionLevel);
+  end
+  else
+  begin
+    pnlWarning.Visible := False;
+  end;
+end;
+```
+
+### Example 3: Real-time Employee Hours Validation
+
+Detect anomalous timesheet entries using Adaptive Detector:
+
+```pascal
+type
+  TTimesheetValidator = class
+  private
+    FDetectorsByEmployee: TDictionary<Integer, TAdaptiveAnomalyDetector>;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    function ValidateHours(AEmployeeID: Integer; AHours: Double;
+                          out AMessage: string): TValidationLevel;
+    procedure ConfirmNormalHours(AEmployeeID: Integer; AHours: Double);
+  end;
+
+type
+  TValidationLevel = (vlNormal, vlWarning, vlError);
+
+constructor TTimesheetValidator.Create;
+begin
+  inherited;
+  FDetectorsByEmployee := TDictionary<Integer, TAdaptiveAnomalyDetector>.Create;
+end;
+
+destructor TTimesheetValidator.Destroy;
+var
+  Detector: TAdaptiveAnomalyDetector;
+begin
+  for Detector in FDetectorsByEmployee.Values do
+    Detector.Free;
+  FDetectorsByEmployee.Free;
+  inherited;
+end;
+
+function TTimesheetValidator.ValidateHours(AEmployeeID: Integer;
+                                           AHours: Double;
+                                           out AMessage: string): TValidationLevel;
+var
+  Detector: TAdaptiveAnomalyDetector;
+  AnomalyResult: TAnomalyResult;
+  HistoricalData: TArray<Double>;
+  i: Integer;
+begin
+  // Get or create detector for this employee
+  if not FDetectorsByEmployee.TryGetValue(AEmployeeID, Detector) then
+  begin
+    Detector := TAdaptiveAnomalyDetector.Create(30, 0.05); // 30-day window, slow adaptation
+
+    // Initialize with typical 8-hour workdays (if no history available)
+    SetLength(HistoricalData, 20);
+    for i := 0 to High(HistoricalData) do
+      HistoricalData[i] := 7.5 + Random * 1.5; // 7.5-9 hours
+    Detector.InitializeWithNormalData(HistoricalData);
+
+    FDetectorsByEmployee.Add(AEmployeeID, Detector);
+  end;
+
+  AnomalyResult := Detector.Detect(AHours);
+
+  if AnomalyResult.IsAnomaly then
+  begin
+    if AHours > AnomalyResult.UpperLimit then
+    begin
+      // Overtime or data entry error
+      if AHours > 16 then
+      begin
+        AMessage := Format('ERROR: %.1f hours exceeds physical limit. ' +
+                          'Expected max: %.1f hours',
+                          [AHours, AnomalyResult.UpperLimit]);
+        Result := vlError; // Block entry
+      end
+      else
+      begin
+        AMessage := Format('WARNING: %.1f hours is unusually high. ' +
+                          'Typical range: %.1f - %.1f hours',
+                          [AHours, AnomalyResult.LowerLimit, AnomalyResult.UpperLimit]);
+        Result := vlWarning; // Require confirmation
+      end;
+    end
+    else
+    begin
+      // Unusually low hours
+      AMessage := Format('WARNING: %.1f hours is unusually low. ' +
+                        'Typical minimum: %.1f hours',
+                        [AHours, AnomalyResult.LowerLimit]);
+      Result := vlWarning;
+    end;
+  end
+  else
+  begin
+    AMessage := 'Normal working hours';
+    Result := vlNormal;
+  end;
+end;
+
+procedure TTimesheetValidator.ConfirmNormalHours(AEmployeeID: Integer; AHours: Double);
+var
+  Detector: TAdaptiveAnomalyDetector;
+begin
+  // User confirmed hours are correct - teach the detector
+  if FDetectorsByEmployee.TryGetValue(AEmployeeID, Detector) then
+    Detector.UpdateNormal(AHours); // Adapt to new normal pattern
+end;
+
+// Usage in timesheet form
+procedure TTimesheetForm.edtHoursExit(Sender: TObject);
+var
+  Hours: Double;
+  Message: string;
+  ValidationLevel: TValidationLevel;
+begin
+  if not TryStrToFloat(edtHours.Text, Hours) then
+    Exit;
+
+  ValidationLevel := FValidator.ValidateHours(FCurrentEmployeeID, Hours, Message);
+
+  case ValidationLevel of
+    vlNormal:
+      begin
+        lblValidation.Caption := Message;
+        lblValidation.Font.Color := clGreen;
+      end;
+
+    vlWarning:
+      begin
+        lblValidation.Caption := Message;
+        lblValidation.Font.Color := clOrange;
+
+        if MessageDlg('Confirm Hours',
+                      Message + #13#10#13#10 + 'Is this correct?',
+                      mtConfirmation, [mbYes, mbNo], 0) = mrYes then
+        begin
+          // User confirmed - teach the detector
+          FValidator.ConfirmNormalHours(FCurrentEmployeeID, Hours);
+        end;
+      end;
+
+    vlError:
+      begin
+        lblValidation.Caption := Message;
+        lblValidation.Font.Color := clRed;
+        edtHours.SetFocus;
+        MessageDlg('Invalid Entry', Message, mtError, [mbOK], 0);
+      end;
+  end;
+end;
+```
+
+### Example 4: Bank Transaction Input Validation
+
+Prevent fraudulent transactions using real-time pattern analysis:
+
+```pascal
+type
+  TTransactionValidator = class
+  private
+    FAmountDetector: TEMAAnomalyDetector;
+    FFrequencyDetector: TSlidingWindowDetector;
+    FLastTransactionTime: TDateTime;
+    FDailyTransactionCount: Integer;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    function ValidateTransaction(AAmount: Double;
+                                out ARiskLevel: string): Boolean;
+  end;
+
+constructor TTransactionValidator.Create;
+begin
+  inherited;
+  // EMA for fast detection of amount changes
+  FAmountDetector := TEMAAnomalyDetector.Create(0.1); // Fast adaptation
+
+  // Sliding window for frequency monitoring
+  FFrequencyDetector := TSlidingWindowDetector.Create(100); // Last 100 transactions
+
+  FLastTransactionTime := Now;
+  FDailyTransactionCount := 0;
+end;
+
+destructor TTransactionValidator.Destroy;
+begin
+  FAmountDetector.Free;
+  FFrequencyDetector.Free;
+  inherited;
+end;
+
+function TTransactionValidator.ValidateTransaction(AAmount: Double;
+                                                   out ARiskLevel: string): Boolean;
+var
+  AmountResult: TAnomalyResult;
+  TimeSinceLastTransaction: Double; // in minutes
+  FrequencyResult: TAnomalyResult;
+begin
+  Result := True; // Assume valid
+  ARiskLevel := 'LOW';
+
+  // Check 1: Amount anomaly
+  AmountResult := FAmountDetector.Detect(AAmount);
+  if AmountResult.IsAnomaly then
+  begin
+    if AAmount > AmountResult.UpperLimit * 2 then
+    begin
+      ARiskLevel := 'CRITICAL - Amount is ' +
+                    FormatFloat('0.0', AmountResult.ZScore) +
+                    'σ above normal';
+      Result := False; // Block transaction
+      Exit;
+    end
+    else
+    begin
+      ARiskLevel := 'HIGH - Unusual amount detected';
+      // Continue checking other factors
+    end;
+  end;
+
+  // Check 2: Transaction frequency
+  TimeSinceLastTransaction := MinutesBetween(Now, FLastTransactionTime);
+  FFrequencyDetector.AddValue(TimeSinceLastTransaction);
+  FrequencyResult := FFrequencyDetector.Detect(TimeSinceLastTransaction);
+
+  if FrequencyResult.IsAnomaly and (TimeSinceLastTransaction < 1) then
+  begin
+    // Transactions less than 1 minute apart
+    if ARiskLevel.StartsWith('HIGH') then
+      ARiskLevel := 'CRITICAL - Rapid transactions with unusual amounts'
+    else
+      ARiskLevel := 'HIGH - Unusually rapid transaction frequency';
+    Result := False;
+    Exit;
+  end;
+
+  // Check 3: Daily transaction count
+  if Date <> DateOf(FLastTransactionTime) then
+    FDailyTransactionCount := 0;
+  Inc(FDailyTransactionCount);
+
+  if FDailyTransactionCount > 50 then
+  begin
+    ARiskLevel := 'HIGH - Daily transaction limit concern';
+    Result := False;
+    Exit;
+  end;
+
+  // Update state
+  FLastTransactionTime := Now;
+  if Result then
+    FAmountDetector.AddValue(AAmount); // Learn from normal transactions only
+end;
+
+// Usage in banking form
+procedure TBankingForm.ProcessTransaction(AAmount: Double);
+var
+  RiskLevel: string;
+  IsValid: Boolean;
+begin
+  IsValid := FValidator.ValidateTransaction(AAmount, RiskLevel);
+
+  // Display risk level
+  lblRisk.Caption := 'Risk Level: ' + RiskLevel;
+
+  if RiskLevel.StartsWith('CRITICAL') then
+    lblRisk.Font.Color := clRed
+  else if RiskLevel.StartsWith('HIGH') then
+    lblRisk.Font.Color := clOrange
+  else
+    lblRisk.Font.Color := clGreen;
+
+  if not IsValid then
+  begin
+    // Require additional authentication
+    if not RequireAdditionalAuth(RiskLevel) then
+    begin
+      ShowMessage('Transaction blocked due to suspicious pattern');
+      Exit;
+    end;
+  end;
+
+  // Process transaction...
+  ExecuteTransaction(AAmount);
+end;
+```
+
+These data entry examples demonstrate how the library can be integrated into business applications to provide real-time validation and fraud prevention during data entry operations.
+
+### Running the Data Entry Demos
+
+**Three separate, focused demo applications** are available in `Samples/DataEntrySample/`:
+
+```bash
+# Invoice validation - Per-supplier amount validation
+Samples\DataEntrySample\InvoiceValidationDemo.exe
+
+# Order validation - Multi-dimensional fraud detection
+Samples\DataEntrySample\OrderValidationDemo.exe
+
+# Timesheet validation - Adaptive employee hours
+Samples\DataEntrySample\TimesheetValidationDemo.exe
+```
+
+Each demo is a standalone program with reusable validation classes:
+
+**1. Invoice Validation Demo** (uses `InvoiceValidator.pas`)
+   - Per-supplier amount validation using Sliding Window
+   - Learns normal invoice ranges for each supplier independently
+   - Catches data entry errors: typos, decimal point errors, wrong supplier
+   - Example: "5000€ is normal for SUP002 but anomalous for SUP001"
+
+**2. Order Validation Demo** (uses `OrderValidator.pas`)
+   - Multi-dimensional fraud detection using Isolation Forest
+   - Analyzes combinations of Amount, Quantity, and Discount%
+   - Detects complex fraud patterns like "high amount + excessive discount"
+   - Trains on 500 normal orders before activation
+
+**3. Timesheet Validation Demo** (uses `TimesheetValidator.pas`)
+   - Adaptive employee hours validation with learning
+   - Per-employee baselines with 3-level validation (Normal/Warning/Error)
+   - Learns from user confirmations (feedback loop)
+   - Blocks physically impossible entries (>16 hours)
+
+**Key Features Demonstrated:**
+- ✓ Real-time validation during data entry
+- ✓ Per-entity learning (per supplier, per employee)
+- ✓ Multi-level validation (Normal, Warning, Error)
+- ✓ User feedback integration (adaptive learning)
+- ✓ Fraud prevention through pattern analysis
+- ✓ Reusable validator classes ready for integration
 
 ## Testing and Validation
 

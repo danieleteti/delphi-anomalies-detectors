@@ -64,7 +64,7 @@ type
   /// Isolation Forest anomaly detector
   /// Excellent for high-dimensional data and unsupervised detection
   /// </summary>
-  TIsolationForestDetector = class(TBaseAnomalyDetector)
+  TIsolationForestDetector = class(TBaseAnomalyDetector, IDensityAnomalyDetector)
   private
     FTrees: TObjectList<TIsolationTree>;
     FNumTrees: Integer;
@@ -80,6 +80,9 @@ type
     function CalculateAveragePathLength(ASize: Integer): Double;
     procedure EnsureTrainingData;
     procedure CalculateOptimalThreshold;
+
+    // Interface implementation
+    function GetDimensions: Integer;
   protected
     procedure CheckAndNotifyAnomaly(const AResult: TAnomalyResult);
   public
@@ -711,6 +714,13 @@ begin
   finally
     FLock.Leave;
   end;
+end;
+
+// IDensityAnomalyDetector interface implementation
+
+function TIsolationForestDetector.GetDimensions: Integer;
+begin
+  Result := FFeatureCount;
 end;
 
 end.

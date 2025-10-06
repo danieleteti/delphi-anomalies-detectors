@@ -21,7 +21,7 @@ type
   /// Sliding window approach for continuous data streams
   /// Best for: Streaming data, real-time monitoring, changing conditions
   /// </summary>
-  TSlidingWindowDetector = class(TBaseAnomalyDetector)
+  TSlidingWindowDetector = class(TBaseAnomalyDetector, IStatisticalAnomalyDetector)
   private
     FWindowData: TList<Double>;
     FWindowSize: Integer;
@@ -35,13 +35,19 @@ type
     procedure UpdateStatisticsIncremental(const AAddedValue, ARemovedValue: Double; AHasRemoved: Boolean);
     procedure RecalculateStatistics;
     procedure CalculateLimits;
+
+    // Interface implementation
+    function GetMean: Double;
+    function GetStdDev: Double;
+    function GetLowerLimit: Double;
+    function GetUpperLimit: Double;
   protected
     procedure CheckAndNotifyAnomaly(const AResult: TAnomalyResult);
   public
     constructor Create(AWindowSize: Integer = 100); overload;
     constructor Create(AWindowSize: Integer; const AConfig: TAnomalyDetectionConfig); overload;
     destructor Destroy; override;
-    procedure AddValue(const AValue: Double);
+    procedure AddValue(const AValue: Double); override;
     procedure InitializeWindow(const AData: TArray<Double>);
     function Detect(const AValue: Double): TAnomalyResult; override;
     procedure SaveState(const AStream: TStream); override;
@@ -354,6 +360,28 @@ begin
   finally
     FLock.Leave;
   end;
+end;
+
+// IStatisticalAnomalyDetector interface implementation
+
+function TSlidingWindowDetector.GetMean: Double;
+begin
+  Result := FMean;
+end;
+
+function TSlidingWindowDetector.GetStdDev: Double;
+begin
+  Result := FStdDev;
+end;
+
+function TSlidingWindowDetector.GetLowerLimit: Double;
+begin
+  Result := FLowerLimit;
+end;
+
+function TSlidingWindowDetector.GetUpperLimit: Double;
+begin
+  Result := FUpperLimit;
 end;
 
 end.
