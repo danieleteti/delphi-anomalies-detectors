@@ -107,9 +107,13 @@ Detector Implementations:
 Each detector has different initialization requirements:
 
 ```pascal
-// Three Sigma - requires historical data before use
-Detector.SetHistoricalData(Data);
-Detector.CalculateStatistics;  // MUST call this before Detect()
+// Three Sigma - Add data, then Build
+for Value in HistoricalData do
+  Detector.AddValue(Value);
+Detector.Build;  // Calculate statistics
+// OR (bulk method)
+Detector.AddValues(Data);
+Detector.Build;
 
 // Sliding Window - can start immediately but needs warm-up
 Detector.AddValue(Value);  // Build window first
@@ -133,6 +137,12 @@ Detector.Train;  // Build the forest
 Detector.TrainFromDataset(Dataset);  // Bulk training
 Detector.TrainFromCSV('data.csv', True);  // From CSV file
 ```
+
+**Consistent API Pattern:**
+All detectors follow a similar pattern:
+- **Training Phase**: `AddValue()` / `AddValues()` / `AddTrainingData()`
+- **Build Phase**: `Build()` / `Train()` to finalize the model
+- **Detection Phase**: `Detect()` for pure detection (doesn't modify state)
 
 ### Critical: Detect vs. AddValue
 
@@ -257,12 +267,13 @@ end;
 
 ## Common Pitfalls to Avoid
 
-1. **Statistics not calculated**: Three Sigma detector requires `CalculateStatistics()` after `SetHistoricalData()`
-2. **Uninitialized detection**: Check `IsInitialized` before using detector
+1. **Forgetting to Build**: Three Sigma detector requires `Build()` after adding data with `AddValue()` / `AddValues()`
+2. **Uninitialized detection**: Check `IsInitialized` before using detector, or handle the exception
 3. **Memory growth**: For streaming data, use fixed-window detectors (Sliding Window, EMA) not Three Sigma
 4. **Division by zero**: Library handles zero/near-zero standard deviation via `MinStdDev` config
 5. **Isolation Forest single-dimensional**: Use `DetectMultiDimensional()` not `Detect()` for proper results
-6. **Forgetting to train**: Isolation Forest must call `Train()` before detection
+6. **Forgetting to Train**: Isolation Forest must call `Train()` before detection
+7. **Dirty training data**: Use `CleanDataWithPercentiles()` before training statistical detectors (ThreeSigma, SlidingWindow, EMA)
 
 ## Sample Workflows
 
@@ -270,8 +281,8 @@ end;
 ```pascal
 Detector := TThreeSigmaDetector.Create;
 try
-  Detector.SetHistoricalData([100, 105, 98, 102, 107, 99, 103, 101, 104, 106]);
-  Detector.CalculateStatistics;
+  Detector.AddValues([100, 105, 98, 102, 107, 99, 103, 101, 104, 106]);
+  Detector.Build;
 
   Result := Detector.Detect(150);
   if Result.IsAnomaly then

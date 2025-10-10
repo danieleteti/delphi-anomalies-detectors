@@ -69,9 +69,7 @@ implementation
 
 constructor TThreeSigmaDetector.Create;
 begin
-  inherited Create('3-Sigma Detector');
-  FData := TList<Double>.Create;
-  FIsCalculated := False;
+  Create(TAnomalyDetectionConfig.Default);
 end;
 
 constructor TThreeSigmaDetector.Create(const AConfig: TAnomalyDetectionConfig);
