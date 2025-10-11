@@ -2389,31 +2389,31 @@ begin
   Evaluator := TAnomalyDetectorEvaluator.Create(Detector, FDataset);
   try
     // Try 20 folds with only 12 data points
-    //Assert.WillRaise(
-    //  procedure
-    //  begin
-    //    Evaluator.CrossValidate(20);
-    //  end,
-    //  EAnomalyDetectionException
-    //);
+    Assert.WillRaise(
+      procedure
+      begin
+        Evaluator.CrossValidate(20);
+      end,
+      EAnomalyDetectionException
+    );
 
     // Try 1 fold (minimum is 2)
-    //Assert.WillRaise(
-    //  procedure
-    //  begin
-    //    Evaluator.CrossValidate(1);
-    //  end,
-    //  EAnomalyDetectionException
-    //);
+    Assert.WillRaise(
+      procedure
+      begin
+        Evaluator.CrossValidate(1);
+      end,
+      EAnomalyDetectionException
+    );
 
     // Try 0 folds
-    //Assert.WillRaise(
-    //  procedure
-    //  begin
-    //    Evaluator.CrossValidate(0);
-    //  end,
-    //  EAnomalyDetectionException
-    //);
+    Assert.WillRaise(
+      procedure
+      begin
+        Evaluator.CrossValidate(0);
+      end,
+      EAnomalyDetectionException
+    );
   finally
     Evaluator.Free;
   end;
@@ -2567,13 +2567,13 @@ begin
   try
     SetLength(EmptySigma, 0);
 
-    //Assert.WillRaise(
-    //  procedure
-    //  begin
-    //    Tuner.GridSearch(EmptySigma);
-    //  end,
-    //  EAnomalyDetectionException
-    //);
+    Assert.WillRaise(
+      procedure
+      begin
+        Tuner.GridSearch(EmptySigma);
+      end,
+      EAnomalyDetectionException
+    );
   finally
     Tuner.Free;
   end;
@@ -2586,22 +2586,22 @@ begin
   Tuner := THyperparameterTuner.Create(adtSlidingWindow, FDataset);
   try
     // Test with 0 iterations
-    //Assert.WillRaise(
-    //  procedure
-    //  begin
-    //    Tuner.RandomSearch(0);
-    //  end,
-    //  EAnomalyDetectionException
-    //);
+    Assert.WillRaise(
+      procedure
+      begin
+        Tuner.RandomSearch(0);
+      end,
+      EAnomalyDetectionException
+    );
 
     // Test with negative iterations
-    //Assert.WillRaise(
-    //  procedure
-    //  begin
-    //    Tuner.RandomSearch(-5);
-    //  end,
-    //  EAnomalyDetectionException
-    //);
+    Assert.WillRaise(
+      procedure
+      begin
+        Tuner.RandomSearch(-5);
+      end,
+      EAnomalyDetectionException
+    );
   finally
     Tuner.Free;
   end;
@@ -2621,8 +2621,21 @@ begin
     Assert.AreEqual(0, Length(TopConfigs), 'Should return empty array when no results');
 
     // Test with invalid count
-    //Assert.WillRaise(procedure begin Tuner.GetTopConfigurations(0); end, EAnomalyDetectionException);
-    //Assert.WillRaise(procedure begin Tuner.GetTopConfigurations(-1); end, EAnomalyDetectionException);
+    Assert.WillRaise(
+      procedure
+      begin
+        Tuner.GetTopConfigurations(0);
+      end,
+      EAnomalyDetectionException
+    );
+
+    Assert.WillRaise(
+      procedure
+      begin
+        Tuner.GetTopConfigurations(-1);
+      end,
+      EAnomalyDetectionException
+    );
   finally
     Tuner.Free;
   end;
