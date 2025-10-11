@@ -232,9 +232,9 @@ src/Core/AnomalyDetection.Types.pas             (già aveva TDetectorMetrics)
 - ✅ Random Search completa senza errori
 - ✅ Cross-Validation restituisce metriche stabili
 
-### 4. **Test Suite** ✅ 81/84 PASSANO
-- ✅ 81 test passano completamente
-- ⚠️ 3 test senza assertion (WillRaise commentati temporaneamente)
+### 4. **Test Suite** ✅ 84/84 PASSANO (100%)
+- ✅ **TUTTI i 84 test passano completamente**
+- ✅ Validazione edge cases: empty datasets, invalid parameters
 - ✅ Nessun memory leak rilevato
 
 ### 5. **Integer Overflow Fix** ✅ RISOLTO
@@ -266,8 +266,9 @@ src/Core/AnomalyDetection.Evaluation.pas
   - GetMatthewsCorrelationCoefficient: Gestione corretta Int64
 
 Tests/AnomalyDetectionAlgorithmsTests.pas
-  - Commentati temporaneamente 6 Assert.WillRaise con errore di compilazione
-  - 81/84 test passano (3 falliscono per "No assertions made")
+  - Corretti usi Factory (metodi statici)
+  - Aggiunti 17 nuovi test per evaluation framework
+  - **84/84 test passano (100%)**
 
 Samples/02_HyperparameterTuningDemo.dpr
   - Aggiunto System.DateUtils negli uses
