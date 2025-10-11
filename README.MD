@@ -1368,6 +1368,300 @@ SlidingDetector := TSlidingWindowDetector.Create(100); // Fixed memory
 // Avoid Three Sigma detector for continuous streams
 ```
 
+## Performance Evaluation & Hyperparameter Tuning
+
+The library includes a comprehensive evaluation framework for measuring detector performance and optimizing hyperparameters based on labeled datasets.
+
+### Confusion Matrix & Classification Metrics
+
+Evaluate your detector's performance using standard machine learning metrics:
+
+```pascal
+uses AnomalyDetection.Evaluation;
+
+var
+  Dataset: TLabeledDataset;
+  Detector: IAnomalyDetector;
+  Evaluator: TAnomalyDetectorEvaluator;
+  Result: TEvaluationResult;
+begin
+  // Create labeled dataset (ground truth)
+  Dataset := TLabeledDataset.Create('My Dataset');
+  try
+    // Add labeled data points
+    Dataset.AddPoint(100, False, 'Normal');  // Value, IsAnomaly, Description
+    Dataset.AddPoint(500, True, 'Anomaly');
+
+    // Or generate synthetic data for testing
+    Dataset.GenerateMixedDataset(1000, 50, 100.0, 10.0);  // 1000 normal, 50 anomalies
+
+    // Evaluate detector
+    Detector := Factory.CreateDetector(adtThreeSigma, 'Test');
+    Evaluator := TAnomalyDetectorEvaluator.Create(Detector, Dataset);
+    try
+      Result := Evaluator.Evaluate;
+
+      // View results
+      WriteLn(Result.ConfusionMatrix.ToDetailedString);
+      WriteLn('Accuracy:  ', Result.ConfusionMatrix.GetAccuracy:0:3);
+      WriteLn('Precision: ', Result.ConfusionMatrix.GetPrecision:0:3);
+      WriteLn('Recall:    ', Result.ConfusionMatrix.GetRecall:0:3);
+      WriteLn('F1-Score:  ', Result.ConfusionMatrix.GetF1Score:0:3);
+    finally
+      Evaluator.Free;
+    end;
+  finally
+    Dataset.Free;
+  end;
+end;
+```
+
+**Confusion Matrix Output Example:**
+```
+                 Predicted
+               Anomaly  Normal
+Actual Anomaly    45      5      (TP=45, FN=5)
+       Normal     20    930      (FP=20, TN=930)
+
+Metrics:
+  Accuracy:  0.975 (97.5% of predictions correct)
+  Precision: 0.692 (of detected anomalies, 69.2% were correct)
+  Recall:    0.900 (detected 90.0% of actual anomalies)
+  F1-Score:  0.783 (harmonic mean of precision and recall)
+```
+
+**Key Metrics Explained:**
+
+- **True Positives (TP)**: Correctly identified anomalies
+- **False Positives (FP)**: Normal data incorrectly marked as anomaly (false alarms)
+- **True Negatives (TN)**: Correctly identified normal data
+- **False Negatives (FN)**: Anomalies missed by detector (missed detections)
+
+- **Accuracy**: Overall correctness = (TP + TN) / Total
+- **Precision**: When detector says "anomaly", how often is it right? = TP / (TP + FP)
+- **Recall**: Of all real anomalies, what % did we detect? = TP / (TP + FN)
+- **F1-Score**: Harmonic mean of Precision and Recall = 2 × (P × R) / (P + R)
+
+### Cross-Validation
+
+Test detector robustness with K-Fold cross-validation:
+
+```pascal
+var
+  Results: TArray<TEvaluationResult>;
+begin
+  Results := Evaluator.CrossValidate(5);  // 5-fold cross-validation
+
+  WriteLn(Evaluator.GenerateCrossValidationReport(Results));
+  // Shows average metrics across all folds
+end;
+```
+
+### Train/Test Split
+
+Evaluate on held-out test data:
+
+```pascal
+var
+  Result: TEvaluationResult;
+begin
+  // Train on 70%, test on 30%
+  Result := Evaluator.EvaluateWithTrainTestSplit(0.7);
+
+  WriteLn('Tested on ', Result.DatasetSize, ' unseen examples');
+  WriteLn('F1-Score: ', Result.ConfusionMatrix.GetF1Score:0:3);
+end;
+```
+
+### Hyperparameter Tuning
+
+Find optimal hyperparameters using Grid Search or Random Search:
+
+#### Grid Search (Exhaustive)
+
+```pascal
+uses AnomalyDetection.Evaluation;
+
+var
+  Dataset: TLabeledDataset;
+  Tuner: THyperparameterTuner;
+  BestConfig: TTuningResult;
+  SigmaValues: TArray<Double>;
+  WindowSizes: TArray<Integer>;
+begin
+  // Create dataset
+  Dataset := TLabeledDataset.Create('Training Data');
+  Dataset.GenerateMixedDataset(1000, 100, 100.0, 10.0);
+
+  // Create tuner
+  Tuner := THyperparameterTuner.Create(adtSlidingWindow, Dataset);
+  try
+    Tuner.OptimizationMetric := 'F1';  // Can be 'Precision', 'Recall', 'F1', or 'Accuracy'
+    Tuner.Verbose := True;
+
+    // Define search space
+    SigmaValues := [2.0, 2.5, 3.0, 3.5, 4.0];
+    WindowSizes := [50, 100, 150, 200];
+
+    // Perform grid search (tests all 20 combinations)
+    BestConfig := Tuner.GridSearch(SigmaValues, nil, WindowSizes, nil);
+
+    WriteLn('Best configuration found:');
+    WriteLn('  Sigma: ', BestConfig.Config.SigmaMultiplier:0:2);
+    WriteLn('  Window: ', BestConfig.Config.WindowSize);
+    WriteLn('  F1-Score: ', BestConfig.Score:0:3);
+
+    // View full report with top 5 configurations
+    WriteLn(Tuner.GenerateTuningReport);
+  finally
+    Tuner.Free;
+    Dataset.Free;
+  end;
+end;
+```
+
+#### Random Search (Faster)
+
+```pascal
+var
+  BestConfig: TTuningResult;
+begin
+  Tuner := THyperparameterTuner.Create(adtEMA, Dataset);
+  try
+    Tuner.OptimizationMetric := 'Recall';  // Optimize for catching all anomalies
+
+    // Test 50 random configurations (much faster than grid search)
+    BestConfig := Tuner.RandomSearch(50);
+
+    WriteLn('Best random config: ', BestConfig.ToString);
+  finally
+    Tuner.Free;
+  end;
+end;
+```
+
+### Optimization Metric Selection
+
+Choose the metric based on business objectives:
+
+**Optimize for PRECISION** (minimize false positives):
+- **Use Case**: Alert systems where false alarms are costly (e.g., 24/7 monitoring, alert fatigue)
+- **Goal**: When detector says "anomaly", you want high confidence it's real
+- **Trade-off**: May miss some real anomalies (lower recall)
+
+```pascal
+Tuner.OptimizationMetric := 'Precision';
+```
+
+**Optimize for RECALL** (minimize false negatives):
+- **Use Case**: Critical systems where missing anomalies is unacceptable (e.g., fraud detection, security)
+- **Goal**: Catch every real anomaly, even if it means more false alarms
+- **Trade-off**: More false positives (alert fatigue risk)
+
+```pascal
+Tuner.OptimizationMetric := 'Recall';
+```
+
+**Optimize for F1-SCORE** (balanced):
+- **Use Case**: General-purpose applications requiring balance
+- **Goal**: Good compromise between precision and recall
+- **Trade-off**: May not excel at either extreme
+
+```pascal
+Tuner.OptimizationMetric := 'F1';
+```
+
+**Optimize for ACCURACY**:
+- **Use Case**: Only when dataset is balanced (similar number of anomalies and normal points)
+- **Caution**: Can be misleading with imbalanced data (e.g., 1% anomalies)
+
+```pascal
+Tuner.OptimizationMetric := 'Accuracy';
+```
+
+### Real-World Tuning Example
+
+```pascal
+// Example: Tuning for financial fraud detection
+// Business requirement: Must catch 95%+ of fraud (high recall),
+// acceptable to investigate some false positives
+
+procedure OptimizeForFraudDetection;
+var
+  Dataset: TLabeledDataset;
+  Tuner: THyperparameterTuner;
+  BestConfig: TTuningResult;
+begin
+  // Load real fraud data with labels
+  Dataset := TLabeledDataset.Create('Transaction History');
+  Dataset.LoadFromCSV('fraud_data.csv', 0, 1, True);  // Value col 0, Label col 1
+
+  WriteLn('Dataset: ', Dataset.Data.Count, ' transactions');
+  WriteLn('Fraud rate: ', Dataset.GetAnomalyPercentage:0:2, '%');
+
+  // Tune for maximum recall (catch all fraud)
+  Tuner := THyperparameterTuner.Create(adtThreeSigma, Dataset);
+  try
+    Tuner.OptimizationMetric := 'Recall';
+
+    // Lower sigma = more sensitive = higher recall
+    BestConfig := Tuner.GridSearch([1.5, 2.0, 2.5, 3.0]);
+
+    WriteLn('Optimal configuration:');
+    WriteLn('  Recall:    ', BestConfig.EvaluationResult.ConfusionMatrix.GetRecall:0:3);
+    WriteLn('  Precision: ', BestConfig.EvaluationResult.ConfusionMatrix.GetPrecision:0:3);
+    WriteLn('  Will catch ', (BestConfig.EvaluationResult.ConfusionMatrix.GetRecall * 100):0:1, '% of fraud');
+    WriteLn('  ', BestConfig.EvaluationResult.ConfusionMatrix.FalsePositives, ' false alarms per ',
+            BestConfig.EvaluationResult.DatasetSize, ' transactions');
+  finally
+    Tuner.Free;
+    Dataset.Free;
+  end;
+end;
+```
+
+### Loading Real Data from CSV
+
+```pascal
+Dataset.LoadFromCSV('sensor_data.csv',
+  0,     // Value column index
+  1,     // Label column index (0=normal, 1=anomaly)
+  True   // Has header row
+);
+```
+
+**CSV Format Example:**
+```csv
+temperature,is_anomaly,timestamp
+98.2,0,2024-01-01 10:00
+99.1,0,2024-01-01 10:01
+150.5,1,2024-01-01 10:02
+98.7,0,2024-01-01 10:03
+```
+
+### Demo Programs
+
+The library includes two comprehensive demo programs:
+
+**`01_EvaluationDemo.dpr`** - Performance Evaluation
+- Basic detector evaluation with confusion matrix
+- Comparing multiple detectors
+- K-fold cross-validation
+- Real-world scenario (server response times)
+
+**`02_HyperparameterTuningDemo.dpr`** - Hyperparameter Optimization
+- Grid search for optimal sigma multiplier
+- 2D tuning (sigma + window size)
+- EMA alpha parameter tuning
+- Grid vs Random search comparison
+- Optimizing for different business objectives
+
+Run these demos to understand evaluation and tuning workflows:
+```bash
+Samples\01_EvaluationDemo.exe
+Samples\02_HyperparameterTuningDemo.exe
+```
+
 ## License
 
 This library is commercial software.
@@ -1380,6 +1674,21 @@ Contributions are welcome! Areas for contribution:
 - Additional visualization features
 - Platform-specific optimizations
 - Documentation improvements
+
+## Complete Professional Workflow
+
+See **[PROFESSIONAL_CHECKLIST.md](PROFESSIONAL_CHECKLIST.md)** for a comprehensive end-to-end production pipeline example covering:
+
+1. **Data Cleaning** - Remove outliers with percentile or IQR methods
+2. **Dataset Preparation** - Load labeled data for validation
+3. **Hyperparameter Tuning** - Grid/Random search for optimal configuration
+4. **Detector Training** - Create production detector with clean data
+5. **Final Validation** - Evaluate with confusion matrix and metrics
+6. **Production Deployment** - Save detector state for production use
+
+The checklist includes complete working code and explains when to use each tool and technique.
+
+---
 
 ## Support
 

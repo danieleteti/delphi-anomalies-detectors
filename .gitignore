@@ -153,3 +153,4 @@ samples/wine_cellar_sample/winecellarclient_mobile/Android64/Debug/
 *.delphilsp.json
 /Tests/Win32/Debug/dunitx-results.xml
 /Tests/dunitx-results.xml
+/nul
