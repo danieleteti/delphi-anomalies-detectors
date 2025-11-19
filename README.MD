@@ -3,7 +3,7 @@
 A comprehensive Delphi library for detecting anomalies in business data using statistical and machine learning approaches. Designed for real-world applications including fraud detection, system monitoring, data validation, and quality control.
 
 [![Delphi](https://img.shields.io/badge/Delphi-10.3%2B-red.svg)](https://www.embarcadero.com/products/delphi)
-[![License](https://img.shields.io/badge/License-Commercial-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Tests](https://img.shields.io/badge/Tests-100%25%20Passing-brightgreen.svg)](Tests/)
 
 ## Features
