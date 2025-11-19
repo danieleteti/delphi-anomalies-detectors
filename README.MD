@@ -5,6 +5,7 @@ A comprehensive Delphi library for detecting anomalies in business data using st
 [![Delphi](https://img.shields.io/badge/Delphi-10.3%2B-red.svg)](https://www.embarcadero.com/products/delphi)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Tests](https://img.shields.io/badge/Tests-100%25%20Passing-brightgreen.svg)](Tests/)
+[![Professional Support](https://img.shields.io/badge/Professional%20Support-Available-blue.svg)](mailto:professionals@bittime.it)
 
 ## Features
 
@@ -541,6 +542,36 @@ Typical throughput on modern hardware (single-threaded):
 | Adaptive | ~70,000 | ~8×window bytes | Instant |
 | Isolation Forest | ~20,000 | ~MB scale | Seconds-Minutes |
 
+## Professional Support & Training
+
+While this library is **open source and free to use**, [Bit Time Professionals](https://www.bittimeprofessionals.com) offers commercial support for teams integrating anomaly detection in production environments.
+
+### 🎓 Training & Workshops
+- **On-site or remote training** on anomaly detection algorithms and best practices
+- **Custom workshops** tailored to your domain (finance, IoT, manufacturing, healthcare)
+- **Code review sessions** for optimal integration and performance
+
+### 🏗️ Consulting & Architecture
+- **System design** for large-scale anomaly detection pipelines
+- **Algorithm selection** and hyperparameter optimization for your specific use case
+- **Performance tuning** for high-throughput environments
+
+### 🔧 Custom Development
+- **Domain-specific detectors** for specialized industries
+- **Integration services** with existing Delphi/enterprise systems
+- **Production deployment support** and monitoring strategies
+
+### 📞 Contact
+
+For inquiries about training, consulting, or custom development:
+
+- **Email**: [professionals@bittime.it](mailto:professionals@bittime.it)
+- **Web**: [www.bittimeprofessionals.com](https://www.bittimeprofessionals.com)
+- **Author**: Daniele Teti ([d.teti@bittime.it](mailto:d.teti@bittime.it))
+- **Languages**: Support available in Italian, English, and Spanish
+
+*Bit Time Professionals has 20+ years of experience delivering mission-critical Delphi solutions and is the creator of [DelphiMVCFramework](https://github.com/danieleteti/delphimvcframework).*
+
 ## Algorithm Selection Guide
 
 ```
@@ -575,14 +606,17 @@ Contributions welcome! Areas of interest:
 
 ## License
 
-Commercial software - proprietary and confidential.
+Apache 2.0
 
-## Author
+## About
 
-**Daniele Teti**
-Email: d.teti@bittime.it
-Web: [www.danieleteti.it](https://www.danieleteti.it)
-Company: [Bit Time Professionals](https://www.bittimeprofessionals.com)
+This library is developed and maintained by **Daniele Teti** at [bit Time Professionals](https://www.bittimeprofessionals.com), a software consulting company specializing in Delphi enterprise solutions, real-time systems, and machine learning integration.
+
+### Get Professional Help
+
+- **Questions?** Open an [issue](https://github.com/danieleteti/delphi-anomalies-detectors/issues)
+- **Commercial support?** Contact [professionals@bittime.it](mailto:professionals@bittime.it)
+- **Training & consulting?** Visit [www.bittimeprofessionals.com](https://www.bittimeprofessionals.com)
 
 ---
 
