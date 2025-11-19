@@ -59,7 +59,7 @@ begin
 end;
 
 
-// Simula il caricamento di ordini da database
+// Simulates loading orders from database
 function LoadOrdersFromDatabase(const CustomerID: string): TArray<TCustomerOrder>;
 var
   i: Integer;
@@ -69,13 +69,13 @@ begin
   SetLength(Result, 100);
   Randomize;
 
-  // Simula 100 ordini "normali" + alcune anomalie nascoste
+  // Simulates 100 "normal" orders + some hidden anomalies
   for i := 0 to 99 do
   begin
     Order.CustomerID := CustomerID;
     Order.OrderDate := EncodeDate(2024, 1, 1) + Random(365);
 
-    // 90 ordini normali (1000-3000€, 1-10 pezzi, 0-15% sconto)
+    // 90 normal orders (1000-3000€, 1-10 pieces, 0-15% discount)
     if i < 90 then
     begin
       BaseAmount := 1000 + Random(2000);
@@ -83,31 +83,31 @@ begin
       Order.Quantity := 1 + Random(10);
       Order.DiscountPercent := Random(16);
     end
-    // 5 ordini con importi anomali (errori di data entry o frodi passate)
+    // 5 orders with anomalous amounts (data entry errors or past frauds)
     else if i < 95 then
     begin
-      // Anomalie nascoste nei dati storici!
+      // Hidden anomalies in historical data!
       case i mod 3 of
-        0: Order.Amount := 50000;  // Importo troppo alto
-        1: Order.Amount := 10;     // Importo troppo basso
-        2: Order.Amount := 99999;  // Errore evidente
+        0: Order.Amount := 50000;  // Amount too high
+        1: Order.Amount := 10;     // Amount too low
+        2: Order.Amount := 99999;  // Obvious error
       end;
       Order.Quantity := 1 + Random(5);
       Order.DiscountPercent := Random(20);
     end
-    // 5 ordini con sconti anomali
+    // 5 orders with anomalous discounts
     else
     begin
       Order.Amount := 1000 + Random(2000);
       Order.Quantity := 1 + Random(10);
-      Order.DiscountPercent := 50 + Random(51); // 50-100% sconto (sospetto!)
+      Order.DiscountPercent := 50 + Random(51); // 50-100% discount (suspicious!)
     end;
 
     Result[i] := Order;
   end;
 end;
 
-procedure DemoApproccioNaive;
+procedure DemoNaiveApproach;
 var
   Orders: TArray<TCustomerOrder>;
   Amounts: TArray<Double>;
@@ -116,57 +116,57 @@ var
   TestOrder: TCustomerOrder;
   AnomalyResult: TAnomalyResult;
 begin
-  WriteColoredLine('═══ APPROCCIO 1: NAIVE (SBAGLIATO) ═══', COLOR_HEADER);
+  WriteColoredLine('=== APPROACH 1: NAIVE (WRONG) ===', COLOR_HEADER);
   WriteLn;
-  WriteLn('Usa TUTTI i dati storici per l''apprendimento, senza pulizia.');
-  WriteLn('Problema: se ci sono anomalie nei dati, il detector le impara come "normali"!');
+  WriteLn('Uses ALL historical data for learning, without cleaning.');
+  WriteLn('Problem: if there are anomalies in the data, the detector learns them as "normal"!');
   WriteLn;
 
-  // Carica ordini dal "database"
-  WriteColoredLine('→ Caricamento ordini dal database...', COLOR_INFO);
+  // Load orders from "database"
+  WriteColoredLine('→ Loading orders from database...', COLOR_INFO);
   Orders := LoadOrdersFromDatabase('CUST001');
-  WriteLn(Format('  Caricati %d ordini storici', [Length(Orders)]));
+  WriteLn(Format('  Loaded %d historical orders', [Length(Orders)]));
   WriteLn;
 
-  // Estrai tutti gli importi (incluse le anomalie nascoste!)
+  // Extract all amounts (including hidden anomalies!)
   SetLength(Amounts, Length(Orders));
   for i := 0 to High(Orders) do
     Amounts[i] := Orders[i].Amount;
 
-  // Crea detector e usa TUTTI i dati
+  // Create detector and use ALL data
   Detector := TThreeSigmaDetector.Create;
   try
-    WriteColoredLine('→ Apprendimento da TUTTI i dati storici...', COLOR_INFO);
+    WriteColoredLine('→ Learning from ALL historical data...', COLOR_INFO);
     Detector.AddValues(Amounts);
     Detector.Build;
 
     WriteLn;
-    WriteColoredLine('Statistiche calcolate:', COLOR_WARNING);
-    WriteLn(Format('  Media: %.2f€', [Detector.Mean]));
-    WriteLn(Format('  Deviazione standard: %.2f€', [Detector.StdDev]));
-    WriteLn(Format('  Range normale: %.2f€ - %.2f€',
+    WriteColoredLine('Statistics calculated:', COLOR_WARNING);
+    WriteLn(Format('  Mean: %.2f€', [Detector.Mean]));
+    WriteLn(Format('  Standard deviation: %.2f€', [Detector.StdDev]));
+    WriteLn(Format('  Normal range: %.2f€ - %.2f€',
            [Detector.LowerLimit, Detector.UpperLimit]));
     WriteLn;
-    WriteLn('⚠ PROBLEMA: La media e lo stddev sono influenzati dalle anomalie presenti!');
-    WriteLn('   Le soglie sono troppo larghe e non rileveranno nuove anomalie simili.');
+    WriteLn('⚠ PROBLEM: Mean and stddev are affected by present anomalies!');
+    WriteLn('   Thresholds are too wide and won't detect similar new anomalies.');
     WriteLn;
 
-    // Test con un ordine sospetto
+    // Test with a suspicious order
     WriteSeparator;
     TestOrder.Amount := 45000;
-    WriteColoredLine('→ Test: nuovo ordine da 45.000€', COLOR_INFO);
+    WriteColoredLine('→ Test: new order of 45,000€', COLOR_INFO);
     AnomalyResult := Detector.Detect(TestOrder.Amount);
 
     if AnomalyResult.IsAnomaly then
-      WriteColoredLine(Format('  ❌ ANOMALIA rilevata (Z-score: %.2f)',
+      WriteColoredLine(Format('  ❌ ANOMALY detected (Z-score: %.2f)',
                      [Abs(AnomalyResult.ZScore)]), COLOR_ERROR)
     else
-      WriteColoredLine(Format('  ✓ Ordine NORMALE (Z-score: %.2f)',
+      WriteColoredLine(Format('  ✓ NORMAL order (Z-score: %.2f)',
                      [Abs(AnomalyResult.ZScore)]), COLOR_SUCCESS);
 
     WriteLn;
     if not AnomalyResult.IsAnomaly then
-      WriteColoredLine('  ⚠ FALSO NEGATIVO: L''ordine dovrebbe essere anomalo!', COLOR_WARNING);
+      WriteColoredLine('  ⚠ FALSE NEGATIVE: The order should be anomalous!', COLOR_WARNING);
 
   finally
     Detector.Free;
@@ -177,7 +177,7 @@ begin
   ReadLn;
 end;
 
-procedure DemoApproccioRobusto;
+procedure DemoRobustApproach;
 var
   Orders: TArray<TCustomerOrder>;
   Amounts: TArray<Double>;
@@ -187,16 +187,16 @@ var
   TestOrder: TCustomerOrder;
   AnomalyResult: TAnomalyResult;
 begin
-  WriteColoredLine('═══ APPROCCIO 2: ROBUSTO CON PERCENTILI (CORRETTO) ═══', COLOR_HEADER);
+  WriteColoredLine('=== APPROACH 2: ROBUST WITH PERCENTILES (CORRECT) ===', COLOR_HEADER);
   WriteLn;
-  WriteLn('Pulisce i dati usando i percentili prima dell''apprendimento.');
-  WriteLn('Solo i dati nel range 5°-95° percentile vengono usati per il training.');
+  WriteLn('Cleans data using percentiles before learning.');
+  WriteLn('Only data in the 5th-95th percentile range are used for training.');
   WriteLn;
 
-  // Carica ordini dal "database"
-  WriteColoredLine('→ Caricamento ordini dal database...', COLOR_INFO);
+  // Load orders from "database"
+  WriteColoredLine('→ Loading orders from database...', COLOR_INFO);
   Orders := LoadOrdersFromDatabase('CUST001');
-  WriteLn(Format('  Caricati %d ordini storici', [Length(Orders)]));
+  WriteLn(Format('  Loaded %d historical orders', [Length(Orders)]));
   WriteLn;
 
   // Estrai tutti gli importi
@@ -204,50 +204,50 @@ begin
   for i := 0 to High(Orders) do
     Amounts[i] := Orders[i].Amount;
 
-  // PULIZIA: usa solo dati nel range 5-95 percentile
-  WriteColoredLine('→ Pulizia dati con percentili (5° - 95°)...', COLOR_INFO);
+  // CLEANING: use only data in 5-95 percentile range
+  WriteColoredLine('→ Cleaning data with percentiles (5th - 95th)...', COLOR_INFO);
   CleaningResult := AnomalyDetection.Utils.CleanDataWithPercentiles(Amounts, 5, 95);
-  WriteLn(Format('  Range di pulizia: %.2f - %.2f',
+  WriteLn(Format('  Cleaning range: %.2f - %.2f',
          [CleaningResult.LowerBound, CleaningResult.UpperBound]));
-  WriteLn(Format('  Dati originali: %d → Dati puliti: %d (rimossi: %d outliers)',
+  WriteLn(Format('  Original data: %d → Clean data: %d (removed: %d outliers)',
          [CleaningResult.OriginalCount, CleaningResult.CleanCount,
           CleaningResult.RemovedCount]));
   WriteLn;
 
-  // Crea detector e usa SOLO i dati puliti
+  // Create detector and use ONLY clean data
   Detector := TThreeSigmaDetector.Create;
   try
-    WriteColoredLine('→ Apprendimento dai dati PULITI...', COLOR_INFO);
+    WriteColoredLine('→ Learning from CLEAN data...', COLOR_INFO);
     Detector.AddValues(CleaningResult.CleanData);
     Detector.Build;
 
     WriteLn;
-    WriteColoredLine('Statistiche calcolate:', COLOR_SUCCESS);
-    WriteLn(Format('  Media: %.2f€', [Detector.Mean]));
-    WriteLn(Format('  Deviazione standard: %.2f€', [Detector.StdDev]));
-    WriteLn(Format('  Range normale: %.2f€ - %.2f€',
+    WriteColoredLine('Statistics calculated:', COLOR_SUCCESS);
+    WriteLn(Format('  Mean: %.2f€', [Detector.Mean]));
+    WriteLn(Format('  Standard deviation: %.2f€', [Detector.StdDev]));
+    WriteLn(Format('  Normal range: %.2f€ - %.2f€',
            [Detector.LowerLimit, Detector.UpperLimit]));
     WriteLn;
-    WriteLn('✓ Le statistiche ora riflettono solo gli ordini "normali"!');
-    WriteLn('  Le soglie sono più strette e accurate.');
+    WriteLn('✓ Statistics now reflect only "normal" orders!');
+    WriteLn('  Thresholds are tighter and more accurate.');
     WriteLn;
 
-    // Test con lo stesso ordine sospetto
+    // Test with the same suspicious order
     WriteSeparator;
     TestOrder.Amount := 45000;
-    WriteColoredLine('→ Test: nuovo ordine da 45.000€', COLOR_INFO);
+    WriteColoredLine('→ Test: new order of 45,000€', COLOR_INFO);
     AnomalyResult := Detector.Detect(TestOrder.Amount);
 
     if AnomalyResult.IsAnomaly then
-      WriteColoredLine(Format('  ❌ ANOMALIA rilevata (Z-score: %.2f)',
+      WriteColoredLine(Format('  ❌ ANOMALY detected (Z-score: %.2f)',
                      [Abs(AnomalyResult.ZScore)]), COLOR_ERROR)
     else
-      WriteColoredLine(Format('  ✓ Ordine NORMALE (Z-score: %.2f)',
+      WriteColoredLine(Format('  ✓ NORMAL order (Z-score: %.2f)',
                      [Abs(AnomalyResult.ZScore)]), COLOR_SUCCESS);
 
     WriteLn;
     if AnomalyResult.IsAnomaly then
-      WriteColoredLine('  ✓ CORRETTO: L''anomalia è stata rilevata!', COLOR_SUCCESS);
+      WriteColoredLine('  ✓ CORRECT: The anomaly was detected!', COLOR_SUCCESS);
 
   finally
     Detector.Free;
@@ -267,25 +267,25 @@ var
   AnomalyResult: TAnomalyResult;
   TestData: TArray<Double>;
 begin
-  WriteColoredLine('═══ APPROCCIO 3: ISOLATION FOREST (MULTI-DIMENSIONALE) ═══', COLOR_HEADER);
+  WriteColoredLine('=== APPROACH 3: ISOLATION FOREST (MULTI-DIMENSIONAL) ===', COLOR_HEADER);
   WriteLn;
-  WriteLn('Isolation Forest è robusto alle anomalie nei dati di training.');
-  WriteLn('Analizza MULTIPLE dimensioni: importo, quantità, sconto.');
+  WriteLn('Isolation Forest is robust to anomalies in training data.');
+  WriteLn('Analyzes MULTIPLE dimensions: amount, quantity, discount.');
   WriteLn;
 
-  // Carica ordini dal "database"
-  WriteColoredLine('→ Caricamento ordini dal database...', COLOR_INFO);
+  // Load orders from "database"
+  WriteColoredLine('→ Loading orders from database...', COLOR_INFO);
   Orders := LoadOrdersFromDatabase('CUST001');
-  WriteLn(Format('  Caricati %d ordini storici', [Length(Orders)]));
+  WriteLn(Format('  Loaded %d historical orders', [Length(Orders)]));
   WriteLn;
 
-  // Crea detector multi-dimensionale
+  // Create multi-dimensional detector
   Detector := TIsolationForestDetector.Create(100, 256, 10);
   try
-    WriteColoredLine('→ Training con dati multi-dimensionali...', COLOR_INFO);
-    WriteLn('  (Importo, Quantità, Sconto%)');
+    WriteColoredLine('→ Training with multi-dimensional data...', COLOR_INFO);
+    WriteLn('  (Amount, Quantity, Discount%)');
 
-    // Aggiungi tutti i dati (anche con anomalie, IF è robusto)
+    // Add all data (even with anomalies, IF is robust)
     for i := 0 to High(Orders) do
     begin
       Detector.AddTrainingData([
@@ -296,32 +296,32 @@ begin
     end;
 
     Detector.Train;
-    WriteColoredLine('  ✓ Training completato!', COLOR_SUCCESS);
+    WriteColoredLine('  ✓ Training completed!', COLOR_SUCCESS);
     WriteLn;
-    WriteLn('  Isolation Forest costruisce alberi che isolano i valori anomali.');
-    WriteLn('  Le anomalie presenti nei dati hanno impatto minimo sul modello.');
+    WriteLn('  Isolation Forest builds trees that isolate anomalous values.');
+    WriteLn('  Anomalies present in the data have minimal impact on the model.');
     WriteLn;
 
-    // Prepara casi di test
+    // Prepare test cases
     TestCases[0].Amount := 2000;
     TestCases[0].Quantity := 5;
     TestCases[0].DiscountPercent := 10;
 
-    TestCases[1].Amount := 50000;  // Importo anomalo
+    TestCases[1].Amount := 50000;  // Anomalous amount
     TestCases[1].Quantity := 1;
     TestCases[1].DiscountPercent := 5;
 
     TestCases[2].Amount := 1500;
     TestCases[2].Quantity := 2;
-    TestCases[2].DiscountPercent := 85;  // Sconto anomalo
+    TestCases[2].DiscountPercent := 85;  // Anomalous discount
 
     WriteSeparator;
-    WriteColoredLine('→ Test con ordini multi-dimensionali:', COLOR_INFO);
+    WriteColoredLine('→ Testing with multi-dimensional orders:', COLOR_INFO);
     WriteLn;
 
     for i := 0 to High(TestCases) do
     begin
-      WriteLn(Format('Test %d: Importo=%.2f€, Quantità=%d, Sconto=%.1f%%',
+      WriteLn(Format('Test %d: Amount=%.2f€, Quantity=%d, Discount=%.1f%%',
              [i + 1, TestCases[i].Amount, TestCases[i].Quantity,
               TestCases[i].DiscountPercent]));
 
@@ -333,16 +333,16 @@ begin
       AnomalyResult := Detector.DetectMultiDimensional(TestData);
 
       if AnomalyResult.IsAnomaly then
-        WriteColoredLine(Format('  ❌ ANOMALIA (Score: %.3f)',
+        WriteColoredLine(Format('  ❌ ANOMALY (Score: %.3f)',
                        [AnomalyResult.ZScore]), COLOR_ERROR)
       else
-        WriteColoredLine(Format('  ✓ NORMALE (Score: %.3f)',
+        WriteColoredLine(Format('  ✓ NORMAL (Score: %.3f)',
                        [AnomalyResult.ZScore]), COLOR_SUCCESS);
       WriteLn;
     end;
 
-    WriteLn('✓ Isolation Forest rileva anomalie su MULTIPLE dimensioni contemporaneamente!');
-    WriteLn('  Un ordine può essere anomalo per importo, quantità, sconto, o combinazione.');
+    WriteLn('✓ Isolation Forest detects anomalies on MULTIPLE dimensions simultaneously!');
+    WriteLn('  An order can be anomalous by amount, quantity, discount, or combination.');
 
   finally
     Detector.Free;
@@ -359,48 +359,48 @@ begin
     WriteColoredLine('  CUSTOMER ORDERS - Anomaly Detection Demo', COLOR_HEADER);
     WriteSeparator;
     WriteLn;
-    WriteLn('Questo demo mostra come gestire dati storici che potrebbero');
-    WriteLn('contenere anomalie (errori, frodi, bug passati).');
+    WriteLn('This demo shows how to handle historical data that might');
+    WriteLn('contain anomalies (errors, frauds, past bugs).');
     WriteLn;
-    WriteLn('Vedremo 3 approcci:');
-    WriteLn('  1. NAIVE - Usa tutti i dati (SBAGLIATO se ci sono anomalie)');
-    WriteLn('  2. ROBUSTO - Pulisce con percentili prima del training');
-    WriteLn('  3. ISOLATION FOREST - Algoritmo robusto multi-dimensionale');
+    WriteLn('We will see 3 approaches:');
+    WriteLn('  1. NAIVE - Uses all data (WRONG if there are anomalies)');
+    WriteLn('  2. ROBUST - Cleans with percentiles before training');
+    WriteLn('  3. ISOLATION FOREST - Robust multi-dimensional algorithm');
     WriteLn;
     WriteLn('Press ENTER to start...');
     ReadLn;
     WriteLn;
 
-    // Demo 1: Approccio naive (sbagliato)
-    DemoApproccioNaive;
+    // Demo 1: Naive approach (wrong)
+    DemoNaiveApproach;
     WriteLn;
 
-    // Demo 2: Approccio robusto con percentili
-    DemoApproccioRobusto;
+    // Demo 2: Robust approach with percentiles
+    DemoRobustApproach;
     WriteLn;
 
-    // Demo 3: Isolation Forest multi-dimensionale
+    // Demo 3: Multi-dimensional Isolation Forest
     DemoIsolationForest;
 
     WriteSeparator;
-    WriteColoredLine('Demo completato!', COLOR_HEADER);
+    WriteColoredLine('Demo completed!', COLOR_HEADER);
     WriteSeparator;
     WriteLn;
-    WriteColoredLine('CONCLUSIONI:', COLOR_SUCCESS);
+    WriteColoredLine('CONCLUSIONS:', COLOR_SUCCESS);
     WriteLn;
-    WriteLn('1. Se usi ThreeSigma/SlidingWindow/EMA:');
-    WriteLn('   → DEVI pulire i dati con percentili (5°-95°)');
-    WriteLn('   → Oppure usa solo dati "certificati normali"');
+    WriteLn('1. If you use ThreeSigma/SlidingWindow/EMA:');
+    WriteLn('   → You MUST clean data with percentiles (5th-95th)');
+    WriteLn('   → Or use only "certified normal" data');
     WriteLn;
-    WriteLn('2. Se usi Isolation Forest:');
-    WriteLn('   → Più robusto, tollera anomalie nei dati');
-    WriteLn('   → Analizza multiple dimensioni insieme');
-    WriteLn('   → Ideale per rilevare frodi e pattern complessi');
+    WriteLn('2. If you use Isolation Forest:');
+    WriteLn('   → More robust, tolerates anomalies in data');
+    WriteLn('   → Analyzes multiple dimensions together');
+    WriteLn('   → Ideal for detecting frauds and complex patterns');
     WriteLn;
-    WriteLn('3. Approccio pratico:');
-    WriteLn('   → Analizza i dati storici con statistiche descrittive');
-    WriteLn('   → Usa percentili per identificare outliers');
-    WriteLn('   → Considera review manuale per validazione');
+    WriteLn('3. Practical approach:');
+    WriteLn('   → Analyze historical data with descriptive statistics');
+    WriteLn('   → Use percentiles to identify outliers');
+    WriteLn('   → Consider manual review for validation');
     WriteLn;
 
   except

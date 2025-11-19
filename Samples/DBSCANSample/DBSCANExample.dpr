@@ -1,4 +1,4 @@
-// ***************************************************************************
+﻿// ***************************************************************************
 //
 // DBSCAN Detector Example - Network Intrusion Detection
 // Demonstrates density-based clustering for multi-dimensional anomaly detection
