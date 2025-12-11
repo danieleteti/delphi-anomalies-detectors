@@ -30,6 +30,7 @@ uses
   AnomalyDetection.Adaptive,
   AnomalyDetection.IsolationForest,
   AnomalyDetection.DBSCAN,
+  AnomalyDetection.LOF,
   AnomalyDetection.Performance,
   AnomalyDetection.Confirmation,
   AnomalyDetection.Evaluation;
@@ -220,6 +221,30 @@ type
     procedure TestSinglePoint;
     [Test]
     procedure TestMaxHistoryLimit;
+  end;
+
+  [TestFixture]
+  TLOFDetectorTests = class
+  private
+    FDetector: TLOFDetector;
+  public
+    [Setup]
+    procedure Setup;
+    [TearDown]
+    procedure TearDown;
+
+    [Test]
+    procedure TestInitialState;
+    [Test]
+    procedure TestInsufficientDataException;
+    [Test]
+    procedure TestSimpleClusterAndOutlier;
+    [Test]
+    procedure TestMultiDimensionalOutlier;
+    [Test]
+    procedure TestDimensionMismatchException;
+    [Test]
+    procedure TestSaveLoadState;
   end;
 
   [TestFixture]
@@ -1614,6 +1639,7 @@ var
   FinancialDetector: IStatisticalAnomalyDetector;
   IoTDetector: IStatisticalAnomalyDetector;
   IsolationDetector: IDensityAnomalyDetector;
+  LOFDetector: IDensityAnomalyDetector;
   Dataset: TArray<TArray<Double>>;
   i: Integer;
   Result: TAnomalyResult;
@@ -1623,6 +1649,7 @@ begin
   FinancialDetector := TAnomalyDetectorFactory.CreateForFinancialData;
   IoTDetector := TAnomalyDetectorFactory.CreateForIoTSensors;
   IsolationDetector := TAnomalyDetectorFactory.CreateForHighDimensionalData;
+  LOFDetector := TAnomalyDetectorFactory.CreateLOF(5, 2); // k=5, 2-dim
 
   // Test Web Traffic detector (Sliding Window)
   for i := 1 to 50 do
@@ -1670,11 +1697,25 @@ begin
   Result := IsolationDetector.DetectMultiDimensional(Instance);
   Assert.IsTrue(Result.IsAnomaly, 'Isolation Forest should detect multi-dim anomaly');
 
+  // Test LOF Detector (multi-dimensional)
+  for i := 0 to 20 do
+    LOFDetector.AddTrainingData([10 + Random * 2 - 1, 10 + Random * 2 - 1]);
+  LOFDetector.AddTrainingData([50,50]); // Outlier
+  LOFDetector.Train;
+
+  Result := LOFDetector.DetectMultiDimensional([10.5, 9.5]);
+  Assert.IsFalse(Result.IsAnomaly, 'LOF detector should classify inlier correctly');
+
+  Result := LOFDetector.DetectMultiDimensional([49, 51]);
+  Assert.IsTrue(Result.IsAnomaly, 'LOF detector should classify outlier correctly');
+
+
   // Verify all detectors are properly initialized
   Assert.IsTrue(WebTrafficDetector.IsInitialized, 'Web traffic detector should be ready');
   Assert.IsTrue(FinancialDetector.IsInitialized, 'Financial detector should be ready');
   Assert.IsTrue(IoTDetector.IsInitialized, 'IoT detector should be ready');
   Assert.IsTrue(IsolationDetector.IsInitialized, 'Isolation detector should be ready');
+  Assert.IsTrue(LOFDetector.IsInitialized, 'LOF detector should be ready');
 end;
 
 { TDBSCANDetectorTests }
@@ -2641,6 +2682,181 @@ begin
   end;
 end;
 
+{ TLOFDetectorTests }
+
+procedure TLOFDetectorTests.Setup;
+begin
+  // Use k=3 for predictable testing, 1 dimension
+  FDetector := TLOFDetector.Create(3, 1);
+end;
+
+procedure TLOFDetectorTests.TearDown;
+begin
+  FDetector.Free;
+end;
+
+procedure TLOFDetectorTests.TestInitialState;
+begin
+  Assert.AreEqual(3, FDetector.KNeighbors, 'KNeighbors should be set from constructor');
+  Assert.AreEqual(1, FDetector.Dimensions, 'Dimensions should be set from constructor');
+  Assert.IsFalse(FDetector.IsInitialized, 'Should not be initialized initially');
+  Assert.AreEqual(0, FDetector.DataPointsCount, 'Should have no data points initially');
+end;
+
+procedure TLOFDetectorTests.TestInsufficientDataException;
+begin
+  // Add fewer points than k+1
+  FDetector.AddValue(100);
+  FDetector.AddValue(101);
+  FDetector.AddValue(102);
+
+  Assert.IsFalse(FDetector.IsInitialized, 'Should not be initialized with insufficient data');
+
+  // Build should fail
+  Assert.WillRaise(
+    procedure
+    begin
+      FDetector.Build;
+    end,
+    EAnomalyDetectionException,
+    'Should raise exception when building with insufficient data'
+  );
+end;
+
+procedure TLOFDetectorTests.TestSimpleClusterAndOutlier;
+var
+  i: Integer;
+  ResultInlier, ResultOutlier: TAnomalyResult;
+begin
+  // Create a dense cluster around 10
+  for i := 0 to 10 do
+    FDetector.AddValue(10 + Random * 0.5);
+
+  // Add a clear outlier
+  FDetector.AddValue(100);
+
+  // Build the model
+  FDetector.Build;
+  Assert.IsTrue(FDetector.IsInitialized, 'Should be initialized after build');
+
+  // Test a point inside the cluster (inlier)
+  ResultInlier := FDetector.Detect(10.2);
+  Assert.IsFalse(ResultInlier.IsAnomaly, 'Point within the cluster should be normal');
+  Assert.IsTrue(ResultInlier.Value < FDetector.Threshold, 'Inlier LOF score should be less than threshold');
+
+  // Test a point far from the cluster (outlier)
+  ResultOutlier := FDetector.Detect(90);
+  Assert.IsTrue(ResultOutlier.IsAnomaly, 'Isolated point should be an anomaly');
+  Assert.IsTrue(ResultOutlier.Value > FDetector.Threshold, 'Outlier LOF score should be greater than threshold');
+end;
+
+procedure TLOFDetectorTests.TestMultiDimensionalOutlier;
+var
+  i: Integer;
+  Detector2D: TLOFDetector;
+  ResultInlier, ResultOutlier: TAnomalyResult;
+begin
+  Detector2D := TLOFDetector.Create(5, 2); // k=5, 2 dimensions
+  try
+    // Create a dense 2D cluster around [10, 10]
+    for i := 0 to 20 do
+      Detector2D.AddPoint([10 + Random * 2 - 1, 10 + Random * 2 - 1]);
+
+    // Add a 2D outlier
+    Detector2D.AddPoint([50, 50]);
+
+    Detector2D.Build;
+    Assert.IsTrue(Detector2D.IsInitialized, '2D detector should be initialized');
+
+    // Test an inlier
+    ResultInlier := Detector2D.DetectMultiDimensional([10.5, 9.8]);
+    Assert.IsFalse(ResultInlier.IsAnomaly, '2D inlier should be normal');
+    Assert.IsTrue(ResultInlier.Value < Detector2D.Threshold, '2D inlier LOF score should be low');
+
+    // Test the outlier
+    ResultOutlier := Detector2D.DetectMultiDimensional([45, 52]);
+    Assert.IsTrue(ResultOutlier.IsAnomaly, '2D outlier should be detected as anomaly');
+    Assert.IsTrue(ResultOutlier.Value > Detector2D.Threshold, '2D outlier LOF score should be high');
+
+  finally
+    Detector2D.Free;
+  end;
+end;
+
+procedure TLOFDetectorTests.TestDimensionMismatchException;
+begin
+  // Detector is created with 1 dimension
+  Assert.WillRaise(
+    procedure
+    begin
+      // Try to add a 2D point
+      FDetector.AddPoint([10, 20]);
+    end,
+    EAnomalyDetectionException,
+    'Should raise exception on dimension mismatch when adding data'
+  );
+
+  // Add enough valid data to build
+  for var i := 0 to 10 do
+    FDetector.AddValue(i);
+  FDetector.Build;
+
+  // Now try to detect with wrong dimension
+  Assert.WillRaise(
+    procedure
+    begin
+      FDetector.DetectMultiDimensional([10, 20]);
+    end,
+    EAnomalyDetectionException,
+    'Should raise exception on dimension mismatch during detection'
+  );
+end;
+
+procedure TLOFDetectorTests.TestSaveLoadState;
+var
+  Stream: TMemoryStream;
+  NewDetector: TLOFDetector;
+  i: Integer;
+  ResultBefore, ResultAfter: TAnomalyResult;
+begin
+  // Add data and build model
+  for i := 0 to 20 do
+    FDetector.AddValue(100 + i);
+  FDetector.Build;
+
+  ResultBefore := FDetector.Detect(200); // Detect an outlier
+
+  Stream := TMemoryStream.Create;
+  try
+    // Save state
+    FDetector.SaveState(Stream);
+    Stream.Position := 0;
+
+    // Create new detector and load state
+    NewDetector := TLOFDetector.Create;
+    try
+      NewDetector.LoadState(Stream);
+
+      // Verify properties
+      Assert.AreEqual(FDetector.KNeighbors, NewDetector.KNeighbors, 'KNeighbors should match after load');
+      Assert.AreEqual(FDetector.Dimensions, NewDetector.Dimensions, 'Dimensions should match after load');
+      Assert.AreEqual(FDetector.DataPointsCount, NewDetector.DataPointsCount, 'DataPointsCount should match');
+      Assert.IsTrue(NewDetector.IsInitialized, 'New detector should be initialized');
+
+      // Verify detection logic
+      ResultAfter := NewDetector.Detect(200);
+
+      Assert.AreEqual(ResultBefore.IsAnomaly, ResultAfter.IsAnomaly, 'Anomaly flag should be identical after load');
+      Assert.IsTrue(AreFloatsEqual(ResultBefore.Value, ResultAfter.Value), 'LOF Score should be identical after load');
+
+    finally
+      NewDetector.Free;
+    end;
+  finally
+    Stream.Free;
+  end;
+end;
+
 initialization
   TDUnitX.RegisterTestFixture(TAnomalyDetectionConfigTests);
   TDUnitX.RegisterTestFixture(TThreeSigmaDetectorTests);
@@ -2653,5 +2869,6 @@ initialization
   TDUnitX.RegisterTestFixture(TIntegrationTests);
   TDUnitX.RegisterTestFixture(TEvaluationFrameworkTests);
   TDUnitX.RegisterTestFixture(THyperparameterTuningTests);
+  TDUnitX.RegisterTestFixture(TLOFDetectorTests);
 
 end.
